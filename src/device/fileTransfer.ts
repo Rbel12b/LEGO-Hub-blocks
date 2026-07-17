@@ -18,10 +18,22 @@ export function validatePath(path: string, policy: UploadPolicy): void {
 
 export function buildUploadSnippet(path: string, length: number): string {
   return [
-    `import sys`,
+    `import sys, os`,
     `_p = ${JSON.stringify(path)}`,
     `if _p in ("/main.py", "/boot.py", "/boot.mpy"):`,
     `    raise ValueError("forbidden path")`,
+    `_d = _p.rsplit("/", 1)[0] or "/"`,
+    `if _d and _d != "/":`,
+    `    _acc = ""`,
+    `    for _part in _d.strip("/").split("/"):`,
+    `        _acc += "/" + _part`,
+    `        try:`,
+    `            os.stat(_acc)`,
+    `        except OSError:`,
+    `            try:`,
+    `                os.mkdir(_acc)`,
+    `            except OSError as _e:`,
+    `                raise OSError("cannot create dir " + _acc + ": " + str(_e))`,
     `_l = ${length}`,
     `_b = bytearray()`,
     `while len(_b) < _l:`,
