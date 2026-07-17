@@ -3,6 +3,8 @@ import { useEffect, useRef } from "react";
 import { registerAllBlocks } from "../blocks";
 import { workspaceToPython } from "../codegen/pythonGen";
 import { buildToolbox } from "../blocks/toolbox";
+import { friendlyTheme } from "./blocklyTheme";
+import "./blockly-theme.css";
 
 registerAllBlocks();
 
@@ -23,9 +25,11 @@ export function BlocklyView({ initialState, showAdvanced, onChange }: Props) {
     const workspace = Blockly.inject(hostRef.current, {
       toolbox: buildToolbox(showAdvanced),
       renderer: "zelos",
-      theme: Blockly.Themes.Zelos,
+      theme: friendlyTheme,
       trashcan: true,
-      zoom: { controls: true, wheel: true, startScale: 0.9 },
+      grid: { spacing: 25, length: 3, colour: "#e2dcce", snap: false },
+      zoom: { controls: true, wheel: true, startScale: 0.9, minScale: 0.4, maxScale: 2.0 },
+      move: { scrollbars: true, drag: true, wheel: false },
     });
     workspaceRef.current = workspace;
     if (initialState) {

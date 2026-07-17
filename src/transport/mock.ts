@@ -93,30 +93,48 @@ export class MockTransport implements Transport {
   private process(): void {
     while (this.buf.length > 0) {
       if (this.state === "IDLE") {
-        // Drain Ctrl-C and CR/LF while idle; enter raw on Ctrl-A.
         const b = this.buf[0];
         if (b === 0x01) {
           this.buf.shift();
           this.state = "RAW_REPL";
           queueMicrotask(() => this.emit(RAW_BANNER));
         } else if (b === 0x02) {
-          this.buf.shift(); // Ctrl-B: stay idle (friendly REPL)
+          this.buf.shift();
         } else {
           this.buf.shift();
         }
       } else if (this.state === "RAW_REPL") {
-        // Expect \x05A\x01 to request raw-paste.
+        const b0 = this.buf[0];
+        // Ctrl-A while already in raw REPL: re-print banner (matches MicroPython).
+        if (b0 === 0x01) {
+          this.buf.shift();
+          queueMicrotask(() => this.emit(RAW_BANNER));
+          continue;
+        }
+        // Ctrl-B: back to friendly REPL.
+        if (b0 === 0x02) {
+          this.buf.shift();
+          this.state = "IDLE";
+          continue;
+        }
+        // Ctrl-C: no-op at raw REPL prompt.
+        if (b0 === 0x03) {
+          this.buf.shift();
+          continue;
+        }
+        // Ctrl-D: soft-reboot request. Simulate reboot by dropping to IDLE.
+        if (b0 === 0x04) {
+          this.buf.shift();
+          this.state = "IDLE";
+          continue;
+        }
+        // Raw-paste request \x05A\x01.
         if (this.buf.length < 3) return;
-        if (this.buf[0] === 0x05 && this.buf[1] === 0x41 && this.buf[2] === 0x01) {
+        if (b0 === 0x05 && this.buf[1] === 0x41 && this.buf[2] === 0x01) {
           this.consume(3);
           this.state = "RAW_PASTE";
           const win = new Uint8Array([0x52, 0x01, WINDOW & 0xff, (WINDOW >> 8) & 0xff]);
           queueMicrotask(() => this.emit(win));
-        } else if (this.buf[0] === 0x03) {
-          this.buf.shift(); // Ctrl-C: still in raw REPL
-        } else if (this.buf[0] === 0x02) {
-          this.buf.shift();
-          this.state = "IDLE";
         } else {
           this.buf.shift();
         }

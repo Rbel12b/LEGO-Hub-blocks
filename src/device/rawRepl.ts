@@ -69,6 +69,20 @@ export class RawRepl {
   }
 
   /**
+   * Soft-reboot the device from raw REPL (Ctrl-D at raw prompt). Device runs
+   * boot.py + main.py again. Invalidates bootstrap so the next action calls
+   * enterRawRepl (which kills main.py via Ctrl-C x2).
+   */
+  async softReset(): Promise<void> {
+    if (!this.bootstrapped) return;
+    try {
+      await this.transport.write(new Uint8Array([CTRL_D]));
+    } catch { /* transport may already be gone */ }
+    this.bootstrapped = false;
+    this.rxBuf = new Uint8Array(0);
+  }
+
+  /**
    * Execute Python source via raw-paste. Optional stdout streaming callback
    * receives decoded text chunks as the device produces them.
    *
