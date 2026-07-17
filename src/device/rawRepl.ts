@@ -69,13 +69,18 @@ export class RawRepl {
   }
 
   /**
-   * Soft-reboot the device from raw REPL (Ctrl-D at raw prompt). Device runs
-   * boot.py + main.py again. Invalidates bootstrap so the next action calls
-   * enterRawRepl (which kills main.py via Ctrl-C x2).
+   * Soft-reboot the device. Ctrl-D only soft-resets from the FRIENDLY REPL —
+   * in raw REPL it submits code. So exit raw first (Ctrl-B), then Ctrl-D.
+   * Device runs boot.py + main.py again. Invalidates bootstrap so the next
+   * action calls enterRawRepl (which kills main.py via Ctrl-C x2 + Ctrl-A).
    */
   async softReset(): Promise<void> {
-    if (!this.bootstrapped) return;
     try {
+      // Ctrl-B: exit raw REPL to friendly REPL. Safe even if already friendly.
+      await this.transport.write(new Uint8Array([CTRL_B]));
+      // Small settle so the device switches modes before Ctrl-D.
+      await this.drainFor(30);
+      // Ctrl-D at friendly REPL: soft reboot -> boot.py + main.py.
       await this.transport.write(new Uint8Array([CTRL_D]));
     } catch { /* transport may already be gone */ }
     this.bootstrapped = false;
