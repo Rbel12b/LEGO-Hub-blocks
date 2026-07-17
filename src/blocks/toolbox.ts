@@ -30,16 +30,20 @@ const NUM_SHADOWS: Record<string, Record<string, number>> = {
   hub_lcd_backlight_duty: { DUTY: 255 },
   hub_lcd_fill: { COLOR: 0 },
   lvgl_label: { X: 10, Y: 10 },
-  lvgl_button: { X: 20, Y: 20, W: 80, H: 30 },
+  lvgl_rect: { X: 10, Y: 10, W: 40, H: 20 },
+  lvgl_circle: { X: 40, Y: 40, D: 20 },
+  lvgl_line: { X1: 0, Y1: 0, X2: 60, Y2: 40, WIDTH: 2 },
 };
 
 const STR_SHADOWS: Record<string, Record<string, string>> = {
   lvgl_label: { TEXT: "hello" },
-  lvgl_button: { TEXT: "OK" },
 };
 
 const VALUE_BLOCK_SHADOWS: Record<string, Record<string, { type: string; fields?: Record<string, string | number> }>> = {
   lvgl_screen_bg: { COLOR: { type: "lvgl_hex_color", fields: { HEX: "000000" } } },
+  lvgl_rect: { COLOR: { type: "lvgl_hex_color", fields: { HEX: "FF0000" } } },
+  lvgl_circle: { COLOR: { type: "lvgl_hex_color", fields: { HEX: "00FF00" } } },
+  lvgl_line: { COLOR: { type: "lvgl_hex_color", fields: { HEX: "FFFFFF" } } },
 };
 
 function blockWithShadows(type: string) {

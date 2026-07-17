@@ -93,25 +93,65 @@ describe("Phase 2 blocks", () => {
     expect(py).toContain(`.set_pos(10, 20)`);
   });
 
-  it("LVGL button emits event callback with body + add_event_cb", () => {
+  it("lvgl_rect emits filled rectangle", () => {
     const ws = makeWorkspace(
       underHat({
-        type: "lvgl_button",
+        type: "lvgl_rect",
         inputs: {
-          TEXT: { block: { type: "text", fields: { TEXT: "OK" } } },
-          X: { block: { type: "math_number", fields: { NUM: 0 } } },
-          Y: { block: { type: "math_number", fields: { NUM: 0 } } },
-          W: { block: { type: "math_number", fields: { NUM: 80 } } },
-          H: { block: { type: "math_number", fields: { NUM: 30 } } },
-          WHEN_CLICKED: { block: { type: "hub_poweroff" } },
+          X: { block: { type: "math_number", fields: { NUM: 5 } } },
+          Y: { block: { type: "math_number", fields: { NUM: 6 } } },
+          W: { block: { type: "math_number", fields: { NUM: 40 } } },
+          H: { block: { type: "math_number", fields: { NUM: 20 } } },
+          COLOR: { block: { type: "lvgl_hex_color", fields: { HEX: "ff0000" } } },
         },
       }),
     );
     const py = workspaceToPython(ws);
-    expect(py).toMatch(/def _btn_\w+_cb\(e\):/);
-    expect(py).toContain("hub.powerOff()");
-    expect(py).toMatch(/lv\.button\(_scr\)/);
-    expect(py).toMatch(/\.add_event_cb\(_btn_\w+_cb, lv\.EVENT\.CLICKED, None\)/);
+    expect(py).toMatch(/_rect_\w+ = lv\.obj\(_scr\)/);
+    expect(py).toContain(".set_pos(5, 6)");
+    expect(py).toContain(".set_size(40, 20)");
+    expect(py).toContain("lv.color_hex(0xFF0000)");
+    expect(py).toContain(".set_style_border_width(0, 0)");
+  });
+
+  it("lvgl_circle emits square-sized obj with RADIUS_CIRCLE", () => {
+    const ws = makeWorkspace(
+      underHat({
+        type: "lvgl_circle",
+        inputs: {
+          X: { block: { type: "math_number", fields: { NUM: 0 } } },
+          Y: { block: { type: "math_number", fields: { NUM: 0 } } },
+          D: { block: { type: "math_number", fields: { NUM: 30 } } },
+          COLOR: { block: { type: "lvgl_hex_color", fields: { HEX: "00ff00" } } },
+        },
+      }),
+    );
+    const py = workspaceToPython(ws);
+    expect(py).toContain(".set_size(30, 30)");
+    expect(py).toContain(".set_style_radius(lv.RADIUS_CIRCLE, 0)");
+    expect(py).toContain("lv.color_hex(0x00FF00)");
+  });
+
+  it("lvgl_line emits point list + line_color + line_width", () => {
+    const ws = makeWorkspace(
+      underHat({
+        type: "lvgl_line",
+        inputs: {
+          X1: { block: { type: "math_number", fields: { NUM: 0 } } },
+          Y1: { block: { type: "math_number", fields: { NUM: 0 } } },
+          X2: { block: { type: "math_number", fields: { NUM: 50 } } },
+          Y2: { block: { type: "math_number", fields: { NUM: 25 } } },
+          COLOR: { block: { type: "lvgl_hex_color", fields: { HEX: "ffffff" } } },
+          WIDTH: { block: { type: "math_number", fields: { NUM: 3 } } },
+        },
+      }),
+    );
+    const py = workspaceToPython(ws);
+    expect(py).toMatch(/_line_\w+ = lv\.line\(_scr\)/);
+    expect(py).toContain(`{"x": 0, "y": 0}`);
+    expect(py).toContain(`{"x": 50, "y": 25}`);
+    expect(py).toContain(".set_style_line_width(3, 0)");
+    expect(py).toContain("lv.color_hex(0xFFFFFF)");
   });
 
   it("lvgl_run emits task_handler loop + import time", () => {
@@ -120,6 +160,24 @@ describe("Phase 2 blocks", () => {
     expect(py).toContain("import time");
     expect(py).toContain("lv.task_handler()");
     expect(py).toContain("time.sleep_ms(5)");
+  });
+
+  it("coerces lpf2.color.PURPLE to RGB hex in LVGL color slot", () => {
+    const ws = makeWorkspace(
+      underHat({
+        type: "lvgl_rect",
+        inputs: {
+          X: { block: { type: "math_number", fields: { NUM: 0 } } },
+          Y: { block: { type: "math_number", fields: { NUM: 0 } } },
+          W: { block: { type: "math_number", fields: { NUM: 10 } } },
+          H: { block: { type: "math_number", fields: { NUM: 10 } } },
+          COLOR: { block: { type: "color_literal", fields: { COLOR: "PURPLE" } } },
+        },
+      }),
+    );
+    const py = workspaceToPython(ws);
+    expect(py).toContain("lv.color_hex(0x800080)");
+    expect(py).not.toContain("lpf2.color.PURPLE");
   });
 
   it("lvgl_hex_color normalizes hex", () => {
