@@ -1,6 +1,9 @@
 import { EVENT_BLOCKS, HUB_BLOCKS } from "./defs/hub";
 import { MOTOR_BLOCKS } from "./defs/motor";
 import { SENSOR_BLOCKS } from "./defs/sensor";
+import { ADVANCED_HUB_BLOCKS } from "./defs/advanced_hub";
+import { ADVANCED_MOTOR_BLOCKS } from "./defs/advanced_motor";
+import { LVGL_BLOCKS } from "./defs/lvgl";
 
 interface ToolboxDef {
   advanced?: boolean;
@@ -21,14 +24,38 @@ const NUM_SHADOWS: Record<string, Record<string, number>> = {
   motor_goto_position: { DEG: 0, SPEED: 50 },
   color_set_light: { L1: 100, L2: 100, L3: 100 },
   distance_set_light: { L1: 100, L2: 100, L3: 100, L4: 100 },
+  motor_set_acc_time: { MS: 500 },
+  motor_set_dec_time: { MS: 500 },
+  basic_motor_power: { POWER: 50 },
+  hub_lcd_backlight_duty: { DUTY: 255 },
+  hub_lcd_fill: { COLOR: 0 },
+  lvgl_label: { X: 10, Y: 10 },
+  lvgl_button: { X: 20, Y: 20, W: 80, H: 30 },
+};
+
+const STR_SHADOWS: Record<string, Record<string, string>> = {
+  lvgl_label: { TEXT: "hello" },
+  lvgl_button: { TEXT: "OK" },
+};
+
+const VALUE_BLOCK_SHADOWS: Record<string, Record<string, { type: string; fields?: Record<string, string | number> }>> = {
+  lvgl_screen_bg: { COLOR: { type: "lvgl_hex_color", fields: { HEX: "000000" } } },
 };
 
 function blockWithShadows(type: string) {
-  const shadows = NUM_SHADOWS[type];
-  if (!shadows) return { kind: "block", type };
+  const nums = NUM_SHADOWS[type];
+  const strs = STR_SHADOWS[type];
+  const values = VALUE_BLOCK_SHADOWS[type];
+  if (!nums && !strs && !values) return { kind: "block", type };
   const inputs: Record<string, unknown> = {};
-  for (const [name, num] of Object.entries(shadows)) {
+  if (nums) for (const [name, num] of Object.entries(nums)) {
     inputs[name] = { shadow: { type: "math_number", fields: { NUM: num } } };
+  }
+  if (strs) for (const [name, s] of Object.entries(strs)) {
+    inputs[name] = { shadow: { type: "text", fields: { TEXT: s } } };
+  }
+  if (values) for (const [name, def] of Object.entries(values)) {
+    inputs[name] = { shadow: def };
   }
   return { kind: "block", type, inputs };
 }
@@ -144,13 +171,15 @@ function categoryOf(defs: readonly ToolboxDef[], name: string, colour: string, s
 }
 
 export function buildToolbox(showAdvanced: boolean) {
+  const screenCategory = showAdvanced ? [categoryOf(LVGL_BLOCKS, "Screen", "280", true)] : [];
   return {
     kind: "categoryToolbox",
     contents: [
       categoryOf(EVENT_BLOCKS, "Events", "45", showAdvanced),
-      categoryOf(HUB_BLOCKS, "Hub", "210", showAdvanced),
-      categoryOf(MOTOR_BLOCKS, "Motor", "160", showAdvanced),
+      categoryOf([...HUB_BLOCKS, ...ADVANCED_HUB_BLOCKS], "Hub", "210", showAdvanced),
+      categoryOf([...MOTOR_BLOCKS, ...ADVANCED_MOTOR_BLOCKS], "Motor", "160", showAdvanced),
       categoryOf(SENSOR_BLOCKS, "Sensor", "260", showAdvanced),
+      ...screenCategory,
       { kind: "sep" },
       ...STANDARD_CATEGORIES,
     ],
