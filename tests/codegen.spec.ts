@@ -1,0 +1,128 @@
+import { describe, expect, it, beforeEach } from "vitest";
+import * as Blockly from "blockly/core";
+import { registerAllBlocks } from "../src/blocks";
+import { workspaceToPython } from "../src/codegen/pythonGen";
+
+beforeEach(() => {
+  registerAllBlocks();
+});
+
+function makeWorkspace(state: object): Blockly.Workspace {
+  const ws = new Blockly.Workspace();
+  Blockly.serialization.workspaces.load(state, ws);
+  return ws;
+}
+
+describe("workspaceToPython", () => {
+  it("emits header + main wrap for empty workspace", () => {
+    const ws = new Blockly.Workspace();
+    const py = workspaceToPython(ws);
+    expect(py).toContain("def main():");
+    expect(py).toContain("try:\n    main()");
+    expect(py).toContain("except KeyboardInterrupt");
+  });
+
+  it("emits direct-port motor call without setup", () => {
+    const ws = makeWorkspace({
+      blocks: {
+        languageVersion: 0,
+        blocks: [
+          {
+            type: "motor_start_power",
+            fields: { PORT: "A" },
+            inputs: {
+              POWER: { block: { type: "math_number", fields: { NUM: 50 } } },
+            },
+          },
+        ],
+      },
+    });
+    const py = workspaceToPython(ws);
+    expect(py).toContain("import hub, lpf2");
+    expect(py).toContain("hub.ports.A.startPower(50)");
+    expect(py).not.toContain("dev_a");
+  });
+
+  it("emits typed-device setup + isinstance guard for color sensor", () => {
+    const ws = makeWorkspace({
+      blocks: {
+        languageVersion: 0,
+        blocks: [
+          {
+            type: "text_print",
+            inputs: {
+              TEXT: { block: { type: "color_get_color", fields: { PORT: "B" } } },
+            },
+          },
+        ],
+      },
+    });
+    const py = workspaceToPython(ws);
+    expect(py).toContain("from lpf2 import devices");
+    expect(py).toContain("dev_b = hub.ports.B.device()");
+    expect(py).toContain("isinstance(dev_b, devices.color_sensor)");
+    expect(py).toContain("dev_b.setMode(devices.color_sensor.MODE_COLOR)");
+    expect(py).toContain("dev_b.getColorIdx()");
+  });
+
+  it("dedupes setup for same port across multiple sensor reads", () => {
+    const ws = makeWorkspace({
+      blocks: {
+        languageVersion: 0,
+        blocks: [
+          {
+            type: "text_print",
+            inputs: { TEXT: { block: { type: "distance_get", fields: { PORT: "C" } } } },
+            next: {
+              block: {
+                type: "text_print",
+                inputs: { TEXT: { block: { type: "distance_get", fields: { PORT: "C" } } } },
+              },
+            },
+          },
+        ],
+      },
+    });
+    const py = workspaceToPython(ws);
+    const occurrences = py.match(/dev_c = hub\.ports\.C\.device\(\)/g) ?? [];
+    expect(occurrences.length).toBe(1);
+  });
+
+  it("warns on port-kind collision", () => {
+    const ws = makeWorkspace({
+      blocks: {
+        languageVersion: 0,
+        blocks: [
+          {
+            type: "text_print",
+            inputs: { TEXT: { block: { type: "color_get_color", fields: { PORT: "A" } } } },
+            next: {
+              block: {
+                type: "text_print",
+                inputs: { TEXT: { block: { type: "distance_get", fields: { PORT: "A" } } } },
+              },
+            },
+          },
+        ],
+      },
+    });
+    const py = workspaceToPython(ws);
+    expect(py).toMatch(/# WARN: port A used as color_sensor and distance_sensor/);
+  });
+
+  it("emits lpf2.color.RED for color literal block", () => {
+    const ws = makeWorkspace({
+      blocks: {
+        languageVersion: 0,
+        blocks: [
+          {
+            type: "text_print",
+            inputs: { TEXT: { block: { type: "color_literal", fields: { COLOR: "RED" } } } },
+          },
+        ],
+      },
+    });
+    const py = workspaceToPython(ws);
+    expect(py).toContain("lpf2.color.RED");
+  });
+});

@@ -1,0 +1,75 @@
+import { PORT_DROPDOWN } from "./hub";
+
+export const SENSOR_BLOCKS = [
+  {
+    type: "color_get_color",
+    message0: "color at %1",
+    args0: [{ type: "field_dropdown", name: "PORT", options: [...PORT_DROPDOWN] }],
+    output: "Number",
+    colour: 260,
+  },
+  {
+    type: "color_get_reflectivity",
+    message0: "reflectivity at %1",
+    args0: [{ type: "field_dropdown", name: "PORT", options: [...PORT_DROPDOWN] }],
+    output: "Number",
+    colour: 260,
+  },
+  {
+    type: "color_get_rgb",
+    message0: "RGB at %1",
+    args0: [{ type: "field_dropdown", name: "PORT", options: [...PORT_DROPDOWN] }],
+    output: "Array",
+    colour: 260,
+  },
+  {
+    type: "color_set_light",
+    message0: "color sensor %1 light L1 %2 L2 %3 L3 %4",
+    args0: [
+      { type: "field_dropdown", name: "PORT", options: [...PORT_DROPDOWN] },
+      { type: "input_value", name: "L1", check: "Number" },
+      { type: "input_value", name: "L2", check: "Number" },
+      { type: "input_value", name: "L3", check: "Number" },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: 260,
+    inputsInline: true,
+  },
+  {
+    type: "distance_get",
+    message0: "distance at %1",
+    args0: [{ type: "field_dropdown", name: "PORT", options: [...PORT_DROPDOWN] }],
+    output: "Number",
+    colour: 260,
+  },
+  {
+    type: "distance_set_light",
+    message0: "distance sensor %1 light L1 %2 L2 %3 L3 %4 L4 %5",
+    args0: [
+      { type: "field_dropdown", name: "PORT", options: [...PORT_DROPDOWN] },
+      { type: "input_value", name: "L1", check: "Number" },
+      { type: "input_value", name: "L2", check: "Number" },
+      { type: "input_value", name: "L3", check: "Number" },
+      { type: "input_value", name: "L4", check: "Number" },
+    ],
+    previousStatement: null,
+    nextStatement: null,
+    colour: 260,
+    inputsInline: true,
+  },
+  {
+    type: "color_distance_get_color",
+    message0: "color+distance color at %1",
+    args0: [{ type: "field_dropdown", name: "PORT", options: [...PORT_DROPDOWN] }],
+    output: "Number",
+    colour: 260,
+  },
+  {
+    type: "color_distance_get_distance",
+    message0: "color+distance distance at %1",
+    args0: [{ type: "field_dropdown", name: "PORT", options: [...PORT_DROPDOWN] }],
+    output: "Number",
+    colour: 260,
+  },
+] as const;

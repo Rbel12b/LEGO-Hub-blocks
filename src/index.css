@@ -1,0 +1,8 @@
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; padding: 0; }
+body {
+  font: 14px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif;
+  color: #eee;
+  background: #0f0f10;
+}
+button { font: inherit; }
