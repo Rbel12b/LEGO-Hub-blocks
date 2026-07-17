@@ -2,7 +2,7 @@ import * as Blockly from "blockly/core";
 import * as En from "blockly/msg/en";
 import "blockly/blocks";
 import { pythonGenerator } from "blockly/python";
-import { HUB_BLOCKS } from "./defs/hub";
+import { EVENT_BLOCKS, HUB_BLOCKS } from "./defs/hub";
 import { MOTOR_BLOCKS } from "./defs/motor";
 import { SENSOR_BLOCKS } from "./defs/sensor";
 import { registerHubGenerators } from "./generators/hub";
@@ -16,7 +16,7 @@ export function registerAllBlocks(): void {
   if (registered) return;
   registered = true;
   Blockly.setLocale(En as unknown as { [key: string]: string });
-  const defs = [...HUB_BLOCKS, ...MOTOR_BLOCKS, ...SENSOR_BLOCKS];
+  const defs = [...EVENT_BLOCKS, ...HUB_BLOCKS, ...MOTOR_BLOCKS, ...SENSOR_BLOCKS];
   Blockly.defineBlocksWithJsonArray(defs as unknown as object[]);
   registerHubGenerators(pythonGenerator);
   registerMotorGenerators(pythonGenerator);

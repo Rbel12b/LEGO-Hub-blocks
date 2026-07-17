@@ -106,9 +106,15 @@ export class RawRepl {
     }
     // End of code.
     await this.transport.write(new Uint8Array([CTRL_D]));
-    // Device ACKs with \x04, then streams stdout, then \x04 + err + \x04>
-    const ack = await this.readOne(5000);
-    if (ack !== CTRL_D) throw new Error(`missing paste ack (got 0x${ack.toString(16)})`);
+    // Device ACKs with \x04, then streams stdout, then \x04 + err + \x04>.
+    // Any \x01 window-increment bytes still in flight from before end-of-code
+    // may arrive before the ack — drain them. \x04 = OK, anything else = fatal.
+    while (true) {
+      const b = await this.readOne(5000);
+      if (b === CTRL_D) break;
+      if (b === 0x01) continue;
+      throw new Error(`missing paste ack (got 0x${b.toString(16)})`);
+    }
     // If caller wants to push stdin bytes to the running program, do it now.
     if (opts.extraStdinBytes && opts.extraStdinBytes.length > 0) {
       await this.transport.write(opts.extraStdinBytes);

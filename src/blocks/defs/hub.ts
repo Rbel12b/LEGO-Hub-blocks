@@ -29,6 +29,17 @@ export const IMU_AXIS = [
   ["roll", "roll"],
 ] as const;
 
+/** Hat / event blocks. Only chains under these execute at program start. */
+export const EVENT_BLOCKS = [
+  {
+    type: "on_program_start",
+    message0: "when program starts",
+    nextStatement: null,
+    colour: 45,
+    tooltip: "Entry point. Blocks attached here run when the program starts.",
+  },
+] as const;
+
 export const HUB_BLOCKS = [
   {
     type: "hub_led_color",

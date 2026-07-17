@@ -44,7 +44,12 @@ export function newBlocksProject(title = "Untitled"): BlocksProject {
     title,
     createdAt: new Date().toISOString(),
     settings: { ...DEFAULT_SETTINGS },
-    workspace: { blocks: { languageVersion: 0, blocks: [] } },
+    workspace: {
+      blocks: {
+        languageVersion: 0,
+        blocks: [{ type: "on_program_start", x: 40, y: 40 }],
+      },
+    },
   };
 }
 
