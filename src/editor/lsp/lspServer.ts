@@ -25,6 +25,11 @@ export interface LspServer {
  */
 export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMessage) => void): LspServer {
   const documents = new Map<string, string>();
+  // Per-URI local binding table. Keys are user-defined names (`A`, `lv`);
+  // values are the dotted chain of stub symbols they reference. Populated
+  // from a shallow regex scan of the document on every didOpen/didChange
+  // — good enough to resolve simple aliasing and single-hop assignments.
+  const localBindings = new Map<string, Map<string, string[]>>();
   const index: StubIndex = buildIndex(stubs);
 
   function respond(id: number | string, result: unknown): void {
@@ -32,6 +37,23 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
   }
   function notify(method: string, params: unknown): void {
     emit({ jsonrpc: "2.0", method, params });
+  }
+
+  /**
+   * Rewrite `chain` so that if its head is a locally bound name, it starts
+   * with the underlying stub chain instead. Runs iteratively to catch
+   * chains-of-bindings.
+   */
+  function applyBindings(uri: string, chain: string[]): string[] {
+    const table = localBindings.get(uri);
+    if (!table || !chain.length) return chain;
+    let out = chain;
+    for (let i = 0; i < 8; i++) {
+      const bind = table.get(out[0]);
+      if (!bind) return out;
+      out = [...bind, ...out.slice(1)];
+    }
+    return out;
   }
 
   function handleCompletion(params: any): unknown {
@@ -52,7 +74,7 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
 
     let items: StubSymbol[] = [];
     if (chain.trailingDot && chain.parts.length) {
-      const target = resolveChain(index, chain.parts);
+      const target = resolveChain(index, applyBindings(uri, chain.parts));
       if (target) items = childrenOf(index, target).filter(notPrivate);
     } else if (chain.parts.length === 1 && !chain.trailingDot) {
       const q = chain.parts[0].toLowerCase();
@@ -61,8 +83,16 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
           items.push(sym);
         }
       }
+      const table = localBindings.get(uri);
+      if (table) {
+        for (const [name, target] of table) {
+          if (!name.toLowerCase().startsWith(q)) continue;
+          const sym = resolveChain(index, target);
+          if (sym) items.push({ ...sym, name, parent: "" });
+        }
+      }
     } else if (chain.parts.length > 1 && !chain.trailingDot) {
-      const parent = resolveChain(index, chain.parts.slice(0, -1));
+      const parent = resolveChain(index, applyBindings(uri, chain.parts.slice(0, -1)));
       if (parent) {
         const q = chain.parts[chain.parts.length - 1].toLowerCase();
         for (const child of childrenOf(index, parent)) {
@@ -93,7 +123,7 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
     while (end < lineText.length && ID_CHAR.test(lineText[end])) end++;
     const chain = chainAt(lineText, end);
     if (!chain.parts.length) return null;
-    const sym = resolveChain(index, chain.parts);
+    const sym = resolveChain(index, applyBindings(uri, chain.parts));
     if (!sym) return null;
     const md = ["```python", sym.detail, "```"];
     if (sym.doc) md.push("", sym.doc);
@@ -120,7 +150,7 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
     if (openIdx < 0) return null;
     const chain = chainAt(lineText, openIdx);
     if (!chain.parts.length) return null;
-    const sym = resolveChain(index, chain.parts);
+    const sym = resolveChain(index, applyBindings(uri, chain.parts));
     if (!sym || (sym.kind !== "function" && sym.kind !== "method")) return null;
 
     const signatures = sym.detail.split("\n").map((detail) => {
@@ -218,6 +248,7 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
         case "textDocument/didOpen": {
           const p = msg.params as any;
           documents.set(p.textDocument.uri, p.textDocument.text);
+          localBindings.set(p.textDocument.uri, scanBindings(p.textDocument.text));
           diagnose(p.textDocument.uri, p.textDocument.text);
           break;
         }
@@ -225,12 +256,14 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
           const p = msg.params as any;
           const change = p.contentChanges[p.contentChanges.length - 1];
           documents.set(p.textDocument.uri, change.text);
+          localBindings.set(p.textDocument.uri, scanBindings(change.text));
           diagnose(p.textDocument.uri, change.text);
           break;
         }
         case "textDocument/didClose": {
           const p = msg.params as any;
           documents.delete(p.textDocument.uri);
+          localBindings.delete(p.textDocument.uri);
           break;
         }
         case "textDocument/completion":
@@ -306,3 +339,46 @@ function completionItemKind(kind: StubSymbol["kind"]): number {
     case "variable": return 6;
   }
 }
+
+const ASSIGN_LINE_RE = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_.]*)\s*(?:#.*)?$/;
+const IMPORT_AS_RE = /^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)/;
+const FROM_IMPORT_RE = /^\s*from\s+([A-Za-z_][A-Za-z0-9_.]*)\s+import\s+(.+)$/;
+
+/**
+ * Scan a document for simple name bindings so completion can follow
+ * user-defined aliases. Supports:
+ *   - `X = <dotted>`  (single-line assignment to a stub expression)
+ *   - `import M as A`
+ *   - `from M import A [as B]`
+ *
+ * Deliberately shallow: no call expressions, no augmented assignments,
+ * no scope tracking. Good enough for the block-generated code shape
+ * and for casual hand-written scripts.
+ */
+export function scanBindings(source: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const raw of source.split("\n")) {
+    const line = raw.replace(/\s*#.*$/, "");
+    let m: RegExpMatchArray | null;
+    if ((m = line.match(IMPORT_AS_RE))) {
+      out.set(m[2], m[1].split("."));
+      continue;
+    }
+    if ((m = line.match(FROM_IMPORT_RE))) {
+      const mod = m[1].split(".");
+      for (const part of m[2].split(",")) {
+        const seg = part.trim();
+        if (!seg) continue;
+        const asMatch = seg.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$/);
+        if (asMatch) out.set(asMatch[2], [...mod, asMatch[1]]);
+        else if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(seg)) out.set(seg, [...mod, seg]);
+      }
+      continue;
+    }
+    if ((m = line.match(ASSIGN_LINE_RE))) {
+      out.set(m[1], m[2].split("."));
+    }
+  }
+  return out;
+}
+

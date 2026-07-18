@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createLspServer, chainAt, type RpcMessage } from "../src/editor/lsp/lspServer";
+import { createLspServer, chainAt, scanBindings, type RpcMessage } from "../src/editor/lsp/lspServer";
 
 const HUB_STUB = `
 class _Ports:
@@ -215,6 +215,92 @@ describe("createLspServer — diagnostics", () => {
     });
     const diag = out.find((m) => m.method === "textDocument/publishDiagnostics")!.params as any;
     expect(diag.diagnostics.length).toBeGreaterThan(0);
+  });
+});
+
+describe("scanBindings", () => {
+  it("captures single-line assignment to dotted expr", () => {
+    const b = scanBindings("A = hub.ports.A\n");
+    expect(b.get("A")).toEqual(["hub", "ports", "A"]);
+  });
+  it("captures `import M as alias`", () => {
+    const b = scanBindings("import lvgl as lv\n");
+    expect(b.get("lv")).toEqual(["lvgl"]);
+  });
+  it("captures `from M import name`", () => {
+    const b = scanBindings("from lpf2 import color\n");
+    expect(b.get("color")).toEqual(["lpf2", "color"]);
+  });
+  it("captures `from M import name as alias`", () => {
+    const b = scanBindings("from lpf2 import color as c\n");
+    expect(b.get("c")).toEqual(["lpf2", "color"]);
+  });
+  it("ignores call expressions", () => {
+    const b = scanBindings("A = hub.ports.A.device()\n");
+    expect(b.has("A")).toBe(false);
+  });
+  it("strips trailing comment", () => {
+    const b = scanBindings("A = hub.ports.A  # motor on port A\n");
+    expect(b.get("A")).toEqual(["hub", "ports", "A"]);
+  });
+});
+
+describe("createLspServer — local bindings", () => {
+  it("completes on a locally-aliased variable (`A = hub.ports.A; A.`)", () => {
+    const src = "import hub\nA = hub.ports.A\nA.";
+    const out: RpcMessage[] = [];
+    const server = createLspServer(STUBS, (m) => out.push(m));
+    server.handle({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    server.handle({
+      jsonrpc: "2.0", method: "textDocument/didOpen",
+      params: { textDocument: { uri: URI, languageId: "python", version: 1, text: src } },
+    });
+    server.handle({
+      jsonrpc: "2.0", id: 200, method: "textDocument/completion",
+      params: { textDocument: { uri: URI }, position: { line: 2, character: 2 } },
+    });
+    const items = (out.find((m) => m.id === 200)!.result as any).items;
+    const names = items.map((it: any) => it.label);
+    expect(names).toContain("startPower");
+  });
+
+  it("updates bindings on didChange", () => {
+    const out: RpcMessage[] = [];
+    const server = createLspServer(STUBS, (m) => out.push(m));
+    server.handle({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    server.handle({
+      jsonrpc: "2.0", method: "textDocument/didOpen",
+      params: { textDocument: { uri: URI, languageId: "python", version: 1, text: "" } },
+    });
+    server.handle({
+      jsonrpc: "2.0", method: "textDocument/didChange",
+      params: { textDocument: { uri: URI, version: 2 }, contentChanges: [{ text: "X = hub.ports.LED\nX." }] },
+    });
+    server.handle({
+      jsonrpc: "2.0", id: 201, method: "textDocument/completion",
+      params: { textDocument: { uri: URI }, position: { line: 1, character: 2 } },
+    });
+    const items = (out.find((m) => m.id === 201)!.result as any).items;
+    const names = items.map((it: any) => it.label);
+    expect(names).toContain("setRgbColor");
+  });
+
+  it("resolves hover through binding", () => {
+    const src = "A = hub.ports.LED\nA.setRgbColor(1,2,3)";
+    const out: RpcMessage[] = [];
+    const server = createLspServer(STUBS, (m) => out.push(m));
+    server.handle({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    server.handle({
+      jsonrpc: "2.0", method: "textDocument/didOpen",
+      params: { textDocument: { uri: URI, languageId: "python", version: 1, text: src } },
+    });
+    server.handle({
+      jsonrpc: "2.0", id: 202, method: "textDocument/hover",
+      params: { textDocument: { uri: URI }, position: { line: 1, character: 6 } },
+    });
+    const hover = out.find((m) => m.id === 202)?.result as any;
+    expect(hover).not.toBeNull();
+    expect(hover.contents.value).toContain("setRgbColor");
   });
 });
 
