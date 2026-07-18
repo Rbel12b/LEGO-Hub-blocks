@@ -6,7 +6,7 @@ built-in Python editor. Read this first before touching any file under
 
 ## Pipeline
 
-```
+```text
 ┌───────────────────────────────────────────────────────────────────────────┐
 │  MonacoView.tsx     ← @monaco-editor/react instance                       │
 │    │                                                                       │
@@ -37,7 +37,7 @@ Monaco providers, only the transport differs.
 ## File map
 
 | Path | Role |
-|------|------|
+| ---- | ---- |
 | [src/editor/MonacoView.tsx](../src/editor/MonacoView.tsx) | Editor host. Grabs Monaco namespace + model on mount, gates LSP on `language === "python" && !readOnly`. |
 | [src/editor/lsp/useLspClient.ts](../src/editor/lsp/useLspClient.ts) | React hook. Watches `settings.lspMode` + `lspRemoteUrl`, creates/tears down transport + client. |
 | [src/editor/lsp/lspClient.ts](../src/editor/lsp/lspClient.ts) | Custom LSP client. Handshake, JSON-RPC bookkeeping, Monaco completion/hover/signature providers, diagnostics → markers. Deliberately does not use `monaco-languageclient` — that library requires swapping monaco-editor for `@codingame/monaco-vscode-editor-api`. |
@@ -48,7 +48,8 @@ Monaco providers, only the transport differs.
 | [src/editor/lsp/stubs/files/hub.pyi](../src/editor/lsp/stubs/files/hub.pyi) | Vendored from `Lpf2-micropython/stubs/hub/__init__.pyi`. Covers `hub.ports`, `hub.buttons`, `hub.imu`, `hub.lcd`, `hub.log`, `hub.board`, `hub.powerOff`. |
 | [src/editor/lsp/stubs/files/lpf2/](../src/editor/lsp/stubs/files/lpf2/) | Vendored from `Lpf2-micropython/modules/Lpf2/stubs/lpf2/`. Package tree with `color`, `devices`, `port_num`, etc. |
 | [src/editor/lsp/stubs/files/lvgl.pyi](../src/editor/lsp/stubs/files/lvgl.pyi) | Vendored from `Lpf2-micropython/stubs/lvgl.pyi`. Machine-generated, ~470 KB. Handle with care. |
-| [src/editor/lsp/stubs/files/pyrightconfig.json](../src/editor/lsp/stubs/files/pyrightconfig.json) | Config used by the remote Pyright server (and ignored by the worker). Points `stubPath` at the same directory. |
+| MicroPython stdlib stubs at root of `src/editor/lsp/stubs/files/` (`machine.pyi`, `esp32.pyi`, `network.pyi`, `_mpy_shed/`, `stdlib/`, ...) | Vendored from `Lpf2-micropython/typings/`. ~1.6 MB. Enables completion for `import machine`, `import time`, etc. |
+| [src/editor/lsp/stubs/files/pyrightconfig.json](../src/editor/lsp/stubs/files/pyrightconfig.json) | Config used by the remote Pyright server (ignored by the worker). `extraPaths: ["."]` + `stubPath: "."` so `import hub` / `import machine` resolve against the same directory. |
 | [src/project/format.ts](../src/project/format.ts) | Adds `lspMode: "off" \| "worker" \| "remote"` + `lspRemoteUrl` to `ProjectSettings`. |
 | [src/project/storage.ts](../src/project/storage.ts) | Merges `DEFAULT_SETTINGS` into loaded autosaves so old projects gain the new fields. |
 | [src/ui/SettingsModal.tsx](../src/ui/SettingsModal.tsx) | User-facing controls: mode dropdown + remote URL input. |
@@ -81,7 +82,7 @@ Kept in sync with the plan file:
    `ports`, `buttons`, `imu`, `lcd`, `log`, `board`, `powerOff`.
 3. Hover `hub.ports.LED.setRgbColor` → signature + type from stub.
 4. Type `foo(` after `hub.powerOff` → signature help panel opens.
-5. Type `def f(: ` — bracket diagnostic surfaces as red squiggle.
+5. Type `def f(:` — bracket diagnostic surfaces as red squiggle.
 6. Toggle Settings → Off → completions vanish.
 7. Toggle Settings → Remote, run `docs/lsp-server`, retry (2)–(5); expect
    richer diagnostics (real type errors).

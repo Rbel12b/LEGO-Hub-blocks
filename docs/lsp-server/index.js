@@ -10,12 +10,13 @@
 // finds `hub`, `lpf2`, `lvgl` at import time.
 
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 import { WebSocketServer } from "ws";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STUBS_DIR = resolve(__dirname, "../../src/editor/lsp/stubs/files");
+const STUBS_URI = pathToFileURL(STUBS_DIR).href.replace(/\/$/, "");
 const PORT = Number(process.env.LSP_PORT ?? 3001);
 
 const wss = new WebSocketServer({ port: PORT });
@@ -53,8 +54,23 @@ wss.on("connection", (socket) => {
   });
 
   // ── ws (raw JSON) → Pyright stdin (framed LSP) ──────────────────────────
+  //
+  // Rewrite the client's `initialize` params: pyright resolves imports
+  // relative to the workspace root, so `rootUri` must point at the stubs
+  // directory (where `hub.pyi`, `lpf2/`, and pyrightconfig.json live).
+  // Without this, `import hub` fails to resolve even though the stubs are
+  // sitting right on disk.
   socket.on("message", (data) => {
-    const body = typeof data === "string" ? data : data.toString("utf8");
+    let body = typeof data === "string" ? data : data.toString("utf8");
+    try {
+      const msg = JSON.parse(body);
+      if (msg.method === "initialize" && msg.params) {
+        msg.params.rootUri = STUBS_URI;
+        msg.params.rootPath = STUBS_DIR;
+        msg.params.workspaceFolders = [{ uri: STUBS_URI, name: "hub-stubs" }];
+        body = JSON.stringify(msg);
+      }
+    } catch { /* forward as-is */ }
     const bytes = Buffer.byteLength(body, "utf8");
     proc.stdin.write(`Content-Length: ${bytes}\r\n\r\n${body}`);
   });
