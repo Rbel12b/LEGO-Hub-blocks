@@ -1,8 +1,9 @@
 {
-  "typeshedPath": "/stubs",
-  "stubPath": "/stubs",
+  "extraPaths": ["."],
+  "stubPath": ".",
   "pythonVersion": "3.11",
   "reportMissingModuleSource": "none",
   "reportMissingImports": "warning",
-  "useLibraryCodeForTypes": true
+  "useLibraryCodeForTypes": true,
+  "typeCheckingMode": "basic"
 }
