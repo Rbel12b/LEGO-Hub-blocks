@@ -15,9 +15,15 @@
     "@monaco-editor/react": "^4.7.0",
     "blockly": "^12.5.1",
     "monaco-editor": "^0.55.1",
+    "monaco-languageclient": "^10.7.0",
+    "pyright": "^1.1.411",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "scratch-blocks": "^2.1.19",
+    "vscode-jsonrpc": "^9.0.1",
+    "vscode-languageclient": "^10.1.0",
+    "vscode-languageserver-protocol": "^3.18.2",
+    "vscode-ws-jsonrpc": "^3.5.0",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
@@ -32,6 +38,7 @@
     "oxlint": "^1.71.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
+    "vite-plugin-node-polyfills": "^0.28.0",
     "vitest": "^4.1.10"
   }
 }

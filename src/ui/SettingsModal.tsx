@@ -1,4 +1,5 @@
 import { useApp } from "../state/store";
+import type { LspMode } from "../project/format";
 
 interface Props {
   onClose: () => void;
@@ -61,6 +62,35 @@ export function SettingsModal({ onClose }: Props) {
           Uploads default to <code>/sd/</code>. With this enabled, uploads may target <code>/</code>.<br />
           Uploads to <code>/main.py</code>, <code>/boot.py</code>, <code>/boot.mpy</code> are always rejected.
         </p>
+
+        <h4 style={{ marginTop: 18, marginBottom: 4 }}>Python LSP</h4>
+        <label style={row}>
+          Mode:
+          <select
+            value={settings.lspMode}
+            onChange={(e) => update({ lspMode: e.target.value as LspMode })}
+          >
+            <option value="off">Off</option>
+            <option value="worker">In-browser (Pyright worker)</option>
+            <option value="remote">Remote (WebSocket)</option>
+          </select>
+        </label>
+        {settings.lspMode === "remote" && (
+          <label style={row}>
+            URL:
+            <input
+              type="text"
+              value={settings.lspRemoteUrl}
+              onChange={(e) => update({ lspRemoteUrl: e.target.value })}
+              style={{ flex: 1, background: "#111", color: "#eee", border: "1px solid #444", padding: 4 }}
+            />
+          </label>
+        )}
+        <p style={{ fontSize: 12, opacity: 0.7 }}>
+          Provides completion, hover, signature help, and diagnostics for the
+          built-in Python editor. Remote mode needs the server in <code>docs/lsp-server/</code>.
+        </p>
+
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
           <button type="button" onClick={onClose} style={{ padding: "6px 14px" }}>Close</button>
         </div>

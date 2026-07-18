@@ -1,0 +1,5 @@
+A: int = 0x00
+B: int = 0x01
+LED: int = 0x32
+CURRENT: int = 0x3B
+VOLTAGE: int = 0x3C

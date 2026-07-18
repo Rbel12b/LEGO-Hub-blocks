@@ -1,4 +1,5 @@
 import type { AnyProject } from "./format";
+import { DEFAULT_SETTINGS } from "./format";
 
 const KEY_AUTOSAVE = "lhb.autosave";
 const KEY_LAST_DEVICE = "lhb.lastDeviceName";
@@ -7,7 +8,9 @@ export function loadAutosave(): AnyProject | null {
   try {
     const raw = localStorage.getItem(KEY_AUTOSAVE);
     if (!raw) return null;
-    return JSON.parse(raw) as AnyProject;
+    const parsed = JSON.parse(raw) as AnyProject;
+    parsed.settings = { ...DEFAULT_SETTINGS, ...parsed.settings };
+    return parsed;
   } catch {
     return null;
   }

@@ -1,0 +1,5 @@
+LEFT: int = 0x00
+RIGHT: int = 0x01
+LED: int = 0x34
+VOLTAGE: int = 0x3B
+RSSI: int = 0x3C

@@ -1,10 +1,14 @@
 export type ProjectType = "blocks" | "python";
 
+export type LspMode = "off" | "worker" | "remote";
+
 export interface ProjectSettings {
   showAdvanced: boolean;
   allowRoot: boolean;
   autoRunAfterUpload: boolean;
   autoreloadInLive: boolean;
+  lspMode: LspMode;
+  lspRemoteUrl: string;
 }
 
 export const DEFAULT_SETTINGS: ProjectSettings = {
@@ -12,6 +16,8 @@ export const DEFAULT_SETTINGS: ProjectSettings = {
   allowRoot: false,
   autoRunAfterUpload: true,
   autoreloadInLive: false,
+  lspMode: "worker",
+  lspRemoteUrl: "ws://localhost:3001",
 };
 
 export interface BlocksProject {
