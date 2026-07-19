@@ -1,9 +1,18 @@
 import { useState } from "react";
 import Editor, { loader, type Monaco } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
+import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { useLspClient } from "./lsp/useLspClient";
 import { DARK_PLUS_NAME, registerDarkPlus } from "./darkPlusTheme";
 import { registerPythonTokens } from "./pythonTokens";
+
+// Monaco spawns web workers for background services (tokenization, diff, etc.).
+// Without a MonacoEnvironment hook it warns and falls back to running worker
+// code on the main thread, which freezes the UI. Python has no bundled
+// language worker — the base editor worker covers everything we use.
+(self as unknown as { MonacoEnvironment: monaco.Environment }).MonacoEnvironment = {
+  getWorker: () => new EditorWorker(),
+};
 
 // @monaco-editor/react defaults to loading Monaco from a CDN, which fails
 // offline (and adds a race between mount and provider registration). Point
@@ -57,10 +66,10 @@ export function MonacoView({ value, language = "python", readOnly = false, onCha
   const [monacoNs, setMonacoNs] = useState<Monaco | null>(null);
   const [model, setModel] = useState<monaco.editor.ITextModel | null>(null);
 
-  // LSP is only wired for editable Python buffers (the built-in editor).
-  // The read-only preview in blocks mode uses the same component but stays
-  // vanilla — passing `null` for the model short-circuits the hook.
-  const lspEnabled = language === "python" && !readOnly;
+  // LSP wires up for any Python buffer, including the read-only preview in
+  // blocks mode — hover / diagnostics still work when the model is driven by
+  // the block generator instead of typing.
+  const lspEnabled = language === "python";
   useLspClient(lspEnabled ? monacoNs : null, lspEnabled ? model : null);
 
   return (
