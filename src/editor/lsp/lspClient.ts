@@ -141,7 +141,7 @@ export function startLspClient(
         return {
           suggestions: (resp.items ?? []).map((it) => ({
             label: it.label,
-            kind: (it.kind ?? monacoNs.languages.CompletionItemKind.Variable) as monaco.languages.CompletionItemKind,
+            kind: lspKindToMonaco(monacoNs, it.kind),
             detail: it.detail,
             documentation: it.documentation
               ? { value: typeof it.documentation === "string" ? it.documentation : it.documentation.value }
@@ -241,6 +241,47 @@ export function startLspClient(
       });
     },
   };
+}
+
+/**
+ * LSP CompletionItemKind uses different numeric values than Monaco's
+ * CompletionItemKind enum. Without translation, every icon renders as a
+ * different symbol than intended (and the suggest widget's per-kind icon
+ * colours never apply). This maps the LSP enum → Monaco enum.
+ */
+function lspKindToMonaco(
+  m: typeof monaco,
+  kind: number | undefined,
+): monaco.languages.CompletionItemKind {
+  const K = m.languages.CompletionItemKind;
+  switch (kind) {
+    case 1: return K.Text;
+    case 2: return K.Method;
+    case 3: return K.Function;
+    case 4: return K.Constructor;
+    case 5: return K.Field;
+    case 6: return K.Variable;
+    case 7: return K.Class;
+    case 8: return K.Interface;
+    case 9: return K.Module;
+    case 10: return K.Property;
+    case 11: return K.Unit;
+    case 12: return K.Value;
+    case 13: return K.Enum;
+    case 14: return K.Keyword;
+    case 15: return K.Snippet;
+    case 16: return K.Color;
+    case 17: return K.File;
+    case 18: return K.Reference;
+    case 19: return K.Folder;
+    case 20: return K.EnumMember;
+    case 21: return K.Constant;
+    case 22: return K.Struct;
+    case 23: return K.Event;
+    case 24: return K.Operator;
+    case 25: return K.TypeParameter;
+    default: return K.Variable;
+  }
 }
 
 function severityOf(m: typeof monaco, sev: number | undefined): monaco.MarkerSeverity {

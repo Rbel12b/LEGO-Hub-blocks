@@ -59,7 +59,7 @@ ports: _Ports
   });
 
   it("handles docstrings and comment leaders", () => {
-    const idx: ReturnType<typeof buildIndex> = { symbols: new Map(), moduleTypes: new Map() };
+    const idx: ReturnType<typeof buildIndex> = { symbols: new Map(), moduleTypes: new Map(), imports: new Map() };
     parseStub(
       "widget.pyi",
       [

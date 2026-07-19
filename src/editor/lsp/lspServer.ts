@@ -302,8 +302,10 @@ interface Chain {
 }
 
 /**
- * Walk backwards from the cursor over `ident (.ident)*` to build the dotted
- * chain being typed. Exported for tests.
+ * Walk backwards from the cursor over `ident (call)? (.ident (call)?)*` to
+ * build the dotted chain being typed. Balanced `(...)` and `[...]` trailers
+ * are skipped — so `hub.ports.A.device().` yields the same chain as
+ * `hub.ports.A.device.`. The resolver knows how to follow return types.
  */
 export function chainAt(line: string, col: number): Chain {
   let i = col;
@@ -318,6 +320,20 @@ export function chainAt(line: string, col: number): Chain {
   if (cur) parts.unshift(cur);
   while (i > 0 && line[i - 1] === ".") {
     i--;
+    // Skip balanced call / subscript trailer(s) that precede the identifier.
+    while (i > 0 && (line[i - 1] === ")" || line[i - 1] === "]")) {
+      const open = line[i - 1] === ")" ? "(" : "[";
+      const close = line[i - 1];
+      let depth = 1;
+      let j = i - 2;
+      while (j >= 0 && depth > 0) {
+        if (line[j] === close) depth++;
+        else if (line[j] === open) depth--;
+        j--;
+      }
+      if (depth !== 0) return { parts, trailingDot, wordStart };
+      i = j + 1;
+    }
     let seg = "";
     while (i > 0 && ID_CHAR.test(line[i - 1])) {
       i--;
@@ -340,9 +356,21 @@ function completionItemKind(kind: StubSymbol["kind"]): number {
   }
 }
 
-const ASSIGN_LINE_RE = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_.]*)\s*(?:#.*)?$/;
+const ASSIGN_RHS_RE = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*(?:#.*)?$/;
 const IMPORT_AS_RE = /^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)/;
 const FROM_IMPORT_RE = /^\s*from\s+([A-Za-z_][A-Za-z0-9_.]*)\s+import\s+(.+)$/;
+
+/** Drop balanced `()` and `[]` trailers so `A.device()` collapses to `A.device`. */
+function stripCalls(s: string): string {
+  let out = "";
+  let depth = 0;
+  for (const c of s) {
+    if (c === "(" || c === "[") { depth++; continue; }
+    if (c === ")" || c === "]") { if (depth > 0) depth--; continue; }
+    if (depth === 0) out += c;
+  }
+  return out;
+}
 
 /**
  * Scan a document for simple name bindings so completion can follow
@@ -375,8 +403,11 @@ export function scanBindings(source: string): Map<string, string[]> {
       }
       continue;
     }
-    if ((m = line.match(ASSIGN_LINE_RE))) {
-      out.set(m[1], m[2].split("."));
+    if ((m = line.match(ASSIGN_RHS_RE))) {
+      const stripped = stripCalls(m[2]).trim();
+      if (/^[A-Za-z_][A-Za-z0-9_.]*$/.test(stripped)) {
+        out.set(m[1], stripped.split("."));
+      }
     }
   }
   return out;

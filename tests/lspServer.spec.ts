@@ -73,6 +73,24 @@ describe("chainAt", () => {
     expect(c.parts).toEqual([]);
     expect(c.trailingDot).toBe(false);
   });
+  it("skips balanced () after a method call", () => {
+    const src = "hub.ports.A.device().";
+    const c = chainAt(src, src.length);
+    expect(c.parts).toEqual(["hub", "ports", "A", "device"]);
+    expect(c.trailingDot).toBe(true);
+  });
+  it("skips nested calls with arguments", () => {
+    const src = "hub.ports.A.device(1, foo(2)).";
+    const c = chainAt(src, src.length);
+    expect(c.parts).toEqual(["hub", "ports", "A", "device"]);
+    expect(c.trailingDot).toBe(true);
+  });
+  it("skips balanced [] subscript", () => {
+    const src = "obj.list[0].";
+    const c = chainAt(src, src.length);
+    expect(c.parts).toEqual(["obj", "list"]);
+    expect(c.trailingDot).toBe(true);
+  });
 });
 
 describe("createLspServer — initialize handshake", () => {
@@ -235,9 +253,19 @@ describe("scanBindings", () => {
     const b = scanBindings("from lpf2 import color as c\n");
     expect(b.get("c")).toEqual(["lpf2", "color"]);
   });
-  it("ignores call expressions", () => {
-    const b = scanBindings("A = hub.ports.A.device()\n");
-    expect(b.has("A")).toBe(false);
+  it("strips call trailers so `X = A.device()` binds `X` → `A.device`", () => {
+    // Call expressions map to their chain (return-type resolution happens
+    // downstream in resolveChain via method typeRef).
+    const b = scanBindings("X = A.device()\n");
+    expect(b.get("X")).toEqual(["A", "device"]);
+  });
+  it("strips nested call trailers", () => {
+    const b = scanBindings("X = hub.ports.A.device(1, foo(2))\n");
+    expect(b.get("X")).toEqual(["hub", "ports", "A", "device"]);
+  });
+  it("skips non-chain RHS (arithmetic, literals)", () => {
+    expect(scanBindings("x = 1 + 2\n").has("x")).toBe(false);
+    expect(scanBindings('s = "hello"\n').has("s")).toBe(false);
   });
   it("strips trailing comment", () => {
     const b = scanBindings("A = hub.ports.A  # motor on port A\n");
@@ -305,23 +333,93 @@ describe("createLspServer — local bindings", () => {
 });
 
 describe("createLspServer — real stubs smoke test", () => {
-  it("resolves hub / lpf2 from the actual vendored stubs", async () => {
+  async function completeAt(source: string, line: number, character: number) {
     const { STUBS: REAL } = await import("../src/editor/lsp/stubs");
     const out: RpcMessage[] = [];
     const server = createLspServer(REAL, (m) => out.push(m));
     server.handle({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     server.handle({
       jsonrpc: "2.0", method: "textDocument/didOpen",
-      params: { textDocument: { uri: URI, languageId: "python", version: 1, text: "hub." } },
+      params: { textDocument: { uri: URI, languageId: "python", version: 1, text: source } },
     });
     server.handle({
-      jsonrpc: "2.0", id: 10, method: "textDocument/completion",
-      params: { textDocument: { uri: URI }, position: { line: 0, character: 4 } },
+      jsonrpc: "2.0", id: 99, method: "textDocument/completion",
+      params: { textDocument: { uri: URI }, position: { line, character } },
     });
-    const items = (out.find((m) => m.id === 10)!.result as any).items;
+    return (out.find((m) => m.id === 99)!.result as any).items;
+  }
+
+  it("resolves hub top-level from vendored stubs", async () => {
+    const items = await completeAt("hub.", 0, 4);
     const names = items.map((it: any) => it.label);
     expect(names).toContain("ports");
     expect(names).toContain("buttons");
     expect(names).toContain("powerOff");
+  });
+
+  it("resolves `hub.ports.A.` through imported alias `_local_port` → `lpf2.local.port`", async () => {
+    const items = await completeAt("hub.ports.A.", 0, 12);
+    const names = items.map((it: any) => it.label);
+    // startPower / startSpeed defined on lpf2.local.port
+    expect(names).toContain("startPower");
+    expect(names).toContain("startSpeed");
+  });
+
+  it("resolves through class inheritance (`hub.ports.A.` → base class members)", async () => {
+    // lpf2.local.port inherits from lpf2.port. Base methods must appear too.
+    const items = await completeAt("hub.ports.A.", 0, 12);
+    const names = items.map((it: any) => it.label);
+    // These live on the base `lpf2.port`, not on `lpf2.local.port` directly.
+    expect(names.length).toBeGreaterThan(5);
+  });
+
+  it("resolves local binding + follows attribute type", async () => {
+    const src = "import hub\nA = hub.ports.A\nA.";
+    const items = await completeAt(src, 2, 2);
+    const names = items.map((it: any) => it.label);
+    expect(names).toContain("startPower");
+  });
+
+  it("follows method return type through Union (`hub.ports.A.device().`)", async () => {
+    // lpf2.port.device returns Union[basic_motor, encoder_motor, color_sensor,
+    // distance_sensor, port_expander, hub_led, accelerometer, gyroscope, None]
+    // — worker picks the first resolvable member so completion at least surfaces
+    // something meaningful.
+    const src = "import hub\nhub.ports.A.device().";
+    const items = await completeAt(src, 1, src.split("\n")[1].length);
+    expect(items.length).toBeGreaterThan(0);
+  });
+
+  it("Union member completion still resolves after didChange", async () => {
+    const src = "hub.ports.A.device().";
+    const items = await completeAt(src, 0, src.length);
+    expect(items.length).toBeGreaterThan(0);
+  });
+
+  it("resolves `lpf2.devices.` to its class list", async () => {
+    const items = await completeAt("import lpf2\nlpf2.devices.", 1, 13);
+    const names = items.map((it: any) => it.label);
+    expect(names).toContain("basic_motor");
+    expect(names).toContain("color_sensor");
+    expect(names).toContain("encoder_motor");
+  });
+
+  it("resolves `lpf2.devices.color_sensor.` methods", async () => {
+    const src = "import lpf2\nlpf2.devices.color_sensor.";
+    const items = await completeAt(src, 1, src.split("\n")[1].length);
+    const names = items.map((it: any) => it.label);
+    expect(names).toContain("getReflectivity");
+    expect(names).toContain("getRGB");
+  });
+
+  it("chains call-result binding through prior binding (`A = hub.ports.A; dev = A.device(); dev.`)", async () => {
+    const src = [
+      "import hub",
+      "A = hub.ports.A",
+      "dev = A.device()",
+      "dev.",
+    ].join("\n");
+    const items = await completeAt(src, 3, 4);
+    expect(items.length).toBeGreaterThan(0);
   });
 });
