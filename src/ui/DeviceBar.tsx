@@ -121,9 +121,9 @@ export function DeviceBar() {
           <button type="button" style={btnStyle} disabled={busy || !serialSupported()} onClick={() => connect("serial")} title={serialSupported() ? "" : "Web Serial unsupported"}>
             Connect (USB)
           </button>
-          <button type="button" style={btnStyle} disabled onClick={() => connect("mock")}>
+          {/* <button type="button" style={btnStyle} onClick={() => connect("mock")}>
             Connect (Mock)
-          </button>
+          </button> */}
         </>
       ) : (
         <>
