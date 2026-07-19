@@ -373,6 +373,8 @@ const ASSIGN_RHS_RE = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*(?:#.*)?$/;
 const IMPORT_AS_RE = /^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)/;
 const FROM_IMPORT_RE = /^\s*from\s+([A-Za-z_][A-Za-z0-9_.]*)\s+import\s+(.+)$/;
 const IF_ISINSTANCE_RE = /^(\s*)if\s+isinstance\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\)\s*:/;
+const IF_NOT_ISINSTANCE_RE = /^(\s*)if\s+not\s+isinstance\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\)\s*:/;
+const EXIT_STMT_RE = /^\s*(raise\b|return\b|continue\b|break\b|sys\.exit\s*\(|exit\s*\(|os\._exit\s*\()/;
 
 export interface Narrowing {
   name: string;
@@ -459,6 +461,25 @@ export function scanScopes(source: string): DocScope {
       });
       continue;
     }
+    // `if not isinstance(x, T): raise/return/...` — post-guard narrowing.
+    // Everything after the block up to the enclosing scope's end sees `x`
+    // as `T`, because control can only continue there when the guard held.
+    if ((m = raw.match(IF_NOT_ISINSTANCE_RE))) {
+      const indent = m[1].length;
+      const name = m[2];
+      const type = m[3];
+      const bodyEnd = findBlockEnd(lines, i + 1, indent);
+      if (blockAlwaysExits(lines, i + 1, bodyEnd, indent)) {
+        const scopeEnd = findScopeEnd(lines, bodyEnd + 1, indent);
+        narrowings.push({
+          name,
+          chain: type.split("."),
+          startLine: bodyEnd + 1,
+          endLine: scopeEnd,
+        });
+      }
+      continue;
+    }
     if ((m = line.match(ASSIGN_RHS_RE))) {
       const stripped = stripCalls(m[2]).trim();
       if (/^[A-Za-z_][A-Za-z0-9_.]*$/.test(stripped)) {
@@ -481,6 +502,43 @@ function findBlockEnd(lines: string[], from: number, outerIndent: number): numbe
     if (!ln.trim()) continue;
     const ind = ln.match(/^\s*/)![0].length;
     if (ind <= outerIndent) return last;
+    last = i;
+  }
+  return lines.length - 1;
+}
+
+/**
+ * True when every code path through `[from, to]` exits the enclosing scope
+ * (raise / return / continue / break / sys.exit / exit / os._exit) at the
+ * block's first indent level. We check any first-level statement matching
+ * an exit — good enough for the guard pattern, no full CFG needed.
+ */
+function blockAlwaysExits(lines: string[], from: number, to: number, outerIndent: number): boolean {
+  let firstInd = -1;
+  for (let i = from; i <= to; i++) {
+    const ln = lines[i];
+    if (!ln?.trim()) continue;
+    const ind = ln.match(/^\s*/)![0].length;
+    if (ind <= outerIndent) continue;
+    if (firstInd < 0) firstInd = ind;
+    if (ind === firstInd && EXIT_STMT_RE.test(ln)) return true;
+  }
+  return false;
+}
+
+/**
+ * From `from`, return the last line at indent `>= scopeIndent + 1`. Blank
+ * lines don't terminate. Used to extend post-guard narrowings to the end of
+ * the enclosing function / module (nested `def`s at deeper indent stay
+ * inside the scope, so their bodies inherit the narrowing).
+ */
+function findScopeEnd(lines: string[], from: number, scopeIndent: number): number {
+  let last = Math.max(from - 1, 0);
+  for (let i = from; i < lines.length; i++) {
+    const ln = lines[i];
+    if (!ln.trim()) continue;
+    const ind = ln.match(/^\s*/)![0].length;
+    if (ind < scopeIndent) return last;
     last = i;
   }
   return lines.length - 1;
