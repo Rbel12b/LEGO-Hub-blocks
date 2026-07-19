@@ -412,6 +412,79 @@ describe("createLspServer — real stubs smoke test", () => {
     expect(names).toContain("getRGB");
   });
 
+  it("resolves Python builtins (`isinstance`, `print`, `len`) without an import", async () => {
+    const src = "isins";
+    const items = await completeAt(src, 0, src.length);
+    const names = items.map((it: any) => it.label);
+    expect(names).toContain("isinstance");
+  });
+
+  it("hovers over builtin `isinstance` shows the function signature", async () => {
+    const { STUBS: REAL } = await import("../src/editor/lsp/stubs");
+    const out: RpcMessage[] = [];
+    const server = createLspServer(REAL, (m) => out.push(m));
+    server.handle({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    server.handle({
+      jsonrpc: "2.0", method: "textDocument/didOpen",
+      params: { textDocument: { uri: URI, languageId: "python", version: 1, text: "isinstance(x, int)" } },
+    });
+    server.handle({
+      jsonrpc: "2.0", id: 300, method: "textDocument/hover",
+      params: { textDocument: { uri: URI }, position: { line: 0, character: 5 } },
+    });
+    const hover = out.find((m) => m.id === 300)?.result as any;
+    expect(hover).not.toBeNull();
+    expect(hover.contents.value).toContain("isinstance");
+  });
+
+  it("signature help inside `isinstance(...)`", async () => {
+    const { STUBS: REAL } = await import("../src/editor/lsp/stubs");
+    const out: RpcMessage[] = [];
+    const server = createLspServer(REAL, (m) => out.push(m));
+    server.handle({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+    const src = "isinstance(x, ";
+    server.handle({
+      jsonrpc: "2.0", method: "textDocument/didOpen",
+      params: { textDocument: { uri: URI, languageId: "python", version: 1, text: src } },
+    });
+    server.handle({
+      jsonrpc: "2.0", id: 301, method: "textDocument/signatureHelp",
+      params: { textDocument: { uri: URI }, position: { line: 0, character: src.length } },
+    });
+    const help = out.find((m) => m.id === 301)?.result as any;
+    expect(help).not.toBeNull();
+    expect(help.signatures[0].label).toContain("isinstance");
+  });
+
+  it("narrows via `if isinstance(dev, lpf2.devices.color_sensor):` block", async () => {
+    const src = [
+      "import hub, lpf2",
+      "dev = hub.ports.A.device()",
+      "if isinstance(dev, lpf2.devices.color_sensor):",
+      "    dev.",
+    ].join("\n");
+    const items = await completeAt(src, 3, 8);
+    const names = items.map((it: any) => it.label);
+    expect(names).toContain("getReflectivity");
+    expect(names).toContain("getRGB");
+  });
+
+  it("narrowing scope ends on dedent", async () => {
+    const src = [
+      "import hub, lpf2",
+      "dev = hub.ports.A.device()",
+      "if isinstance(dev, lpf2.devices.color_sensor):",
+      "    pass",
+      "dev.",
+    ].join("\n");
+    const items = await completeAt(src, 4, 4);
+    // Outside the narrowing block, dev is back to the Union return; still
+    // resolves (first Union member) but should NOT be color_sensor-specific
+    // when the union's first member (basic_motor) has different methods.
+    const names = items.map((it: any) => it.label);
+    expect(names).not.toContain("getReflectivity");
+  });
+
   it("chains call-result binding through prior binding (`A = hub.ports.A; dev = A.device(); dev.`)", async () => {
     const src = [
       "import hub",

@@ -25,11 +25,9 @@ export interface LspServer {
  */
 export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMessage) => void): LspServer {
   const documents = new Map<string, string>();
-  // Per-URI local binding table. Keys are user-defined names (`A`, `lv`);
-  // values are the dotted chain of stub symbols they reference. Populated
-  // from a shallow regex scan of the document on every didOpen/didChange
-  // — good enough to resolve simple aliasing and single-hop assignments.
-  const localBindings = new Map<string, Map<string, string[]>>();
+  // Per-URI scope info: file-scope bindings + position-scoped narrowings
+  // (from `if isinstance(name, Type):` blocks).
+  const localScopes = new Map<string, DocScope>();
   const index: StubIndex = buildIndex(stubs);
 
   function respond(id: number | string, result: unknown): void {
@@ -40,18 +38,24 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
   }
 
   /**
-   * Rewrite `chain` so that if its head is a locally bound name, it starts
-   * with the underlying stub chain instead. Runs iteratively to catch
-   * chains-of-bindings.
+   * Rewrite `chain` so that if its head is a locally bound (or narrowed)
+   * name, it starts with the underlying stub chain instead. `line` is the
+   * cursor's line number — used to pick the innermost live `isinstance`
+   * narrowing at that position.
+   *
+   * Precedence: narrowing at line → file-scope binding → bare name → builtins.
    */
-  function applyBindings(uri: string, chain: string[]): string[] {
-    const table = localBindings.get(uri);
-    if (!table || !chain.length) return chain;
+  function applyBindings(uri: string, chain: string[], line: number): string[] {
+    if (!chain.length) return chain;
+    const scope = localScopes.get(uri);
     let out = chain;
     for (let i = 0; i < 8; i++) {
-      const bind = table.get(out[0]);
-      if (!bind) return out;
+      const bind = lookupBinding(scope, out[0], line);
+      if (!bind) break;
       out = [...bind, ...out.slice(1)];
+    }
+    if (!index.symbols.has(out[0]) && index.symbols.has(`builtins.${out[0]}`)) {
+      out = ["builtins", ...out];
     }
     return out;
   }
@@ -63,6 +67,7 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
     const source = documents.get(uri) ?? "";
     const lineText = source.split("\n")[line] ?? "";
     const chain = chainAt(lineText, character);
+    const rebind = (parts: string[]) => applyBindings(uri, parts, line);
 
     // Hide Python-private (`_`-prefixed) helpers unless the user is explicitly
     // typing an underscore. Vendored stubs expose lots of implementation
@@ -74,7 +79,7 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
 
     let items: StubSymbol[] = [];
     if (chain.trailingDot && chain.parts.length) {
-      const target = resolveChain(index, applyBindings(uri, chain.parts));
+      const target = resolveChain(index, rebind(chain.parts));
       if (target) items = childrenOf(index, target).filter(notPrivate);
     } else if (chain.parts.length === 1 && !chain.trailingDot) {
       const q = chain.parts[0].toLowerCase();
@@ -83,16 +88,24 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
           items.push(sym);
         }
       }
-      const table = localBindings.get(uri);
-      if (table) {
-        for (const [name, target] of table) {
+      // Also propose Python builtins (`isinstance`, `print`, `len`, ...) that
+      // are visible in every scope without an explicit import.
+      const builtins = index.symbols.get("builtins");
+      if (builtins) {
+        for (const child of childrenOf(index, builtins)) {
+          if (child.name.toLowerCase().startsWith(q) && notPrivate(child)) items.push(child);
+        }
+      }
+      const scope = localScopes.get(uri);
+      if (scope) {
+        for (const [name, target] of scope.globals) {
           if (!name.toLowerCase().startsWith(q)) continue;
           const sym = resolveChain(index, target);
           if (sym) items.push({ ...sym, name, parent: "" });
         }
       }
     } else if (chain.parts.length > 1 && !chain.trailingDot) {
-      const parent = resolveChain(index, applyBindings(uri, chain.parts.slice(0, -1)));
+      const parent = resolveChain(index, rebind(chain.parts.slice(0, -1)));
       if (parent) {
         const q = chain.parts[chain.parts.length - 1].toLowerCase();
         for (const child of childrenOf(index, parent)) {
@@ -123,7 +136,7 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
     while (end < lineText.length && ID_CHAR.test(lineText[end])) end++;
     const chain = chainAt(lineText, end);
     if (!chain.parts.length) return null;
-    const sym = resolveChain(index, applyBindings(uri, chain.parts));
+    const sym = resolveChain(index, applyBindings(uri, chain.parts, line));
     if (!sym) return null;
     const md = ["```python", sym.detail, "```"];
     if (sym.doc) md.push("", sym.doc);
@@ -150,7 +163,7 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
     if (openIdx < 0) return null;
     const chain = chainAt(lineText, openIdx);
     if (!chain.parts.length) return null;
-    const sym = resolveChain(index, applyBindings(uri, chain.parts));
+    const sym = resolveChain(index, applyBindings(uri, chain.parts, line));
     if (!sym || (sym.kind !== "function" && sym.kind !== "method")) return null;
 
     const signatures = sym.detail.split("\n").map((detail) => {
@@ -248,7 +261,7 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
         case "textDocument/didOpen": {
           const p = msg.params as any;
           documents.set(p.textDocument.uri, p.textDocument.text);
-          localBindings.set(p.textDocument.uri, scanBindings(p.textDocument.text));
+          localScopes.set(p.textDocument.uri, scanScopes(p.textDocument.text));
           diagnose(p.textDocument.uri, p.textDocument.text);
           break;
         }
@@ -256,14 +269,14 @@ export function createLspServer(stubs: Record<string, string>, emit: (msg: RpcMe
           const p = msg.params as any;
           const change = p.contentChanges[p.contentChanges.length - 1];
           documents.set(p.textDocument.uri, change.text);
-          localBindings.set(p.textDocument.uri, scanBindings(change.text));
+          localScopes.set(p.textDocument.uri, scanScopes(change.text));
           diagnose(p.textDocument.uri, change.text);
           break;
         }
         case "textDocument/didClose": {
           const p = msg.params as any;
           documents.delete(p.textDocument.uri);
-          localBindings.delete(p.textDocument.uri);
+          localScopes.delete(p.textDocument.uri);
           break;
         }
         case "textDocument/completion":
@@ -359,6 +372,30 @@ function completionItemKind(kind: StubSymbol["kind"]): number {
 const ASSIGN_RHS_RE = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*(?:#.*)?$/;
 const IMPORT_AS_RE = /^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)/;
 const FROM_IMPORT_RE = /^\s*from\s+([A-Za-z_][A-Za-z0-9_.]*)\s+import\s+(.+)$/;
+const IF_ISINSTANCE_RE = /^(\s*)if\s+isinstance\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\)\s*:/;
+
+export interface Narrowing {
+  name: string;
+  chain: string[];
+  startLine: number;
+  endLine: number;
+}
+
+export interface DocScope {
+  globals: Map<string, string[]>;
+  narrowings: Narrowing[];
+}
+
+function lookupBinding(scope: DocScope | undefined, name: string, line: number): string[] | undefined {
+  if (!scope) return undefined;
+  // Innermost-narrowing-first: iterate narrowings that cover this line
+  // (deeper ones appear later after their outer siblings — reversed).
+  for (let i = scope.narrowings.length - 1; i >= 0; i--) {
+    const n = scope.narrowings[i];
+    if (n.name === name && line >= n.startLine && line <= n.endLine) return n.chain;
+  }
+  return scope.globals.get(name);
+}
 
 /** Drop balanced `()` and `[]` trailers so `A.device()` collapses to `A.device`. */
 function stripCalls(s: string): string {
@@ -373,23 +410,29 @@ function stripCalls(s: string): string {
 }
 
 /**
- * Scan a document for simple name bindings so completion can follow
- * user-defined aliases. Supports:
- *   - `X = <dotted>`  (single-line assignment to a stub expression)
+ * Scan a document for file-scope name bindings and position-scoped
+ * `isinstance` narrowings. Supports:
+ *   - `X = <dotted>`             (assignment, call trailers stripped)
  *   - `import M as A`
  *   - `from M import A [as B]`
+ *   - `if isinstance(name, Type):` block — `name` narrows to `Type` inside
  *
- * Deliberately shallow: no call expressions, no augmented assignments,
- * no scope tracking. Good enough for the block-generated code shape
- * and for casual hand-written scripts.
+ * Deliberately shallow. Good enough for the block-generated shape and casual
+ * hand-written scripts. Extend `narrowings` semantics if we ever add
+ * `assert isinstance(x, T)` or `elif` chains.
  */
-export function scanBindings(source: string): Map<string, string[]> {
-  const out = new Map<string, string[]>();
-  for (const raw of source.split("\n")) {
+export function scanScopes(source: string): DocScope {
+  const globals = new Map<string, string[]>();
+  const narrowings: Narrowing[] = [];
+  const lines = source.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
     const line = raw.replace(/\s*#.*$/, "");
     let m: RegExpMatchArray | null;
+
     if ((m = line.match(IMPORT_AS_RE))) {
-      out.set(m[2], m[1].split("."));
+      globals.set(m[2], m[1].split("."));
       continue;
     }
     if ((m = line.match(FROM_IMPORT_RE))) {
@@ -398,18 +441,53 @@ export function scanBindings(source: string): Map<string, string[]> {
         const seg = part.trim();
         if (!seg) continue;
         const asMatch = seg.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$/);
-        if (asMatch) out.set(asMatch[2], [...mod, asMatch[1]]);
-        else if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(seg)) out.set(seg, [...mod, seg]);
+        if (asMatch) globals.set(asMatch[2], [...mod, asMatch[1]]);
+        else if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(seg)) globals.set(seg, [...mod, seg]);
       }
+      continue;
+    }
+    if ((m = raw.match(IF_ISINSTANCE_RE))) {
+      const indent = m[1].length;
+      const name = m[2];
+      const type = m[3];
+      const endLine = findBlockEnd(lines, i + 1, indent);
+      narrowings.push({
+        name,
+        chain: type.split("."),
+        startLine: i + 1,
+        endLine,
+      });
       continue;
     }
     if ((m = line.match(ASSIGN_RHS_RE))) {
       const stripped = stripCalls(m[2]).trim();
       if (/^[A-Za-z_][A-Za-z0-9_.]*$/.test(stripped)) {
-        out.set(m[1], stripped.split("."));
+        globals.set(m[1], stripped.split("."));
       }
     }
   }
-  return out;
+  return { globals, narrowings };
+}
+
+/**
+ * Given the line following an `if`/`for`/etc header at `outerIndent`, find
+ * the last line of that indented block. Blank lines don't terminate the
+ * block; a dedent to `outerIndent` or less does.
+ */
+function findBlockEnd(lines: string[], from: number, outerIndent: number): number {
+  let last = from;
+  for (let i = from; i < lines.length; i++) {
+    const ln = lines[i];
+    if (!ln.trim()) continue;
+    const ind = ln.match(/^\s*/)![0].length;
+    if (ind <= outerIndent) return last;
+    last = i;
+  }
+  return lines.length - 1;
+}
+
+/** Back-compat alias (older tests). */
+export function scanBindings(source: string): Map<string, string[]> {
+  return scanScopes(source).globals;
 }
 
