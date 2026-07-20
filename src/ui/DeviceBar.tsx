@@ -7,18 +7,10 @@ import { useApp } from "../state/store";
 import { sanitizeFilename } from "../utils/sanitize";
 import { saveLastDeviceName } from "../project/storage";
 
-const btnStyle: React.CSSProperties = {
-  padding: "6px 12px",
-  border: "1px solid #444",
-  background: "#2a2a2a",
-  color: "#eee",
-  cursor: "pointer",
-  borderRadius: 4,
-};
-
 export function DeviceBar() {
   const { device, connection, connectionError, setDevice, setConnection, appendConsole, project, pythonPreview } = useApp();
   const [busy, setBusy] = useState(false);
+  const dark = project.type === "python";
 
   const connect = async (kind: "ble" | "serial" | "mock") => {
     setBusy(true);
@@ -111,14 +103,59 @@ export function DeviceBar() {
 
   const status = connection === "connected" ? `Connected` : connection === "connecting" ? "Connecting…" : connection === "error" ? `Error: ${connectionError}` : "Disconnected";
 
+  const barBg = dark ? "#0b1216" : "#e0eff4";
+  const barBorder = dark ? "#164e63" : "#b6dbe4";
+  const barText = dark ? "#dff5fb" : "#0b3b48";
+
+  const btnStyle: React.CSSProperties = {
+    padding: "6px 12px",
+    border: dark ? "1px solid #164e63" : "1px solid #b6dbe4",
+    background: dark ? "#111a20" : "#ffffff",
+    color: dark ? "#dff5fb" : "#0b3b48",
+    cursor: "pointer",
+    borderRadius: 6,
+    fontWeight: 600,
+  };
+
+  const primaryBtn: React.CSSProperties = {
+    ...btnStyle,
+    background: "#0e7490",
+    color: "#ffffff",
+    border: "1px solid #155e75",
+  };
+
+  const dangerBtn: React.CSSProperties = {
+    ...btnStyle,
+    background: dark ? "#4a1414" : "#ffe4e4",
+    color: dark ? "#ffb0b0" : "#8a1c1c",
+    border: dark ? "1px solid #6a1c1c" : "1px solid #f0b4b4",
+  };
+
+  const successBtn: React.CSSProperties = {
+    ...btnStyle,
+    background: dark ? "#0f3e21" : "#e6f8ee",
+    color: dark ? "#a9dcbc" : "#0f5e2f",
+    border: dark ? "1px solid #1a5a30" : "1px solid #a9dcbc",
+  };
+
+  const badgeBg = (kind: "ok" | "err" | "idle") =>
+    dark
+      ? kind === "ok" ? "#0f3e21" : kind === "err" ? "#4a1414" : "#111a20"
+      : kind === "ok" ? "#d7f2e0" : kind === "err" ? "#f9d7d7" : "#dff2f8";
+  const badgeFg = (kind: "ok" | "err" | "idle") =>
+    dark
+      ? kind === "ok" ? "#a9dcbc" : kind === "err" ? "#ffb0b0" : "#dff5fb"
+      : kind === "ok" ? "#0f5e2f" : kind === "err" ? "#8a1c1c" : "#0b3b48";
+  const kind: "ok" | "err" | "idle" = connection === "connected" ? "ok" : connection === "error" ? "err" : "idle";
+
   return (
-    <div style={{ display: "flex", gap: 8, padding: "6px 12px", background: "#1a1a1a", color: "#ddd", alignItems: "center", borderBottom: "1px solid #333" }}>
+    <div style={{ display: "flex", gap: 8, padding: "6px 14px", background: barBg, color: barText, alignItems: "center", borderBottom: `1px solid ${barBorder}` }}>
       {!device ? (
         <>
-          <button type="button" style={btnStyle} disabled={busy || !bleSupported()} onClick={() => connect("ble")} title={bleSupported() ? "" : "Web Bluetooth unsupported"}>
+          <button type="button" style={primaryBtn} disabled={busy || !bleSupported()} onClick={() => connect("ble")} title={bleSupported() ? "" : "Web Bluetooth unsupported"}>
             Connect (BLE)
           </button>
-          <button type="button" style={btnStyle} disabled={busy || !serialSupported()} onClick={() => connect("serial")} title={serialSupported() ? "" : "Web Serial unsupported"}>
+          <button type="button" style={primaryBtn} disabled={busy || !serialSupported()} onClick={() => connect("serial")} title={serialSupported() ? "" : "Web Serial unsupported"}>
             Connect (USB)
           </button>
           {/* <button type="button" style={btnStyle} onClick={() => connect("mock")}>
@@ -128,12 +165,24 @@ export function DeviceBar() {
       ) : (
         <>
           <button type="button" style={btnStyle} disabled={busy} onClick={disconnect}>Disconnect</button>
-          <button type="button" style={{ ...btnStyle, background: "#155" }} disabled={busy} onClick={run}>Run</button>
-          <button type="button" style={{ ...btnStyle, background: "#511" }} disabled={busy} onClick={stop}>Stop</button>
-          <button type="button" style={{ ...btnStyle, background: "#252" }} disabled={busy} onClick={upload}>Upload</button>
+          <button type="button" style={successBtn} disabled={busy} onClick={run}>Run</button>
+          <button type="button" style={dangerBtn} disabled={busy} onClick={stop}>Stop</button>
+          <button type="button" style={primaryBtn} disabled={busy} onClick={upload}>Upload</button>
         </>
       )}
-      <span style={{ marginLeft: "auto", opacity: 0.8 }}>{status}</span>
+      <span
+        style={{
+          marginLeft: "auto",
+          fontWeight: 600,
+          padding: "3px 10px",
+          borderRadius: 999,
+          background: badgeBg(kind),
+          color: badgeFg(kind),
+          border: dark ? "1px solid #164e63" : "1px solid rgba(0,0,0,0.05)",
+        }}
+      >
+        {status}
+      </span>
     </div>
   );
 }

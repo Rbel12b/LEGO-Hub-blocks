@@ -11,18 +11,54 @@ registerAllBlocks();
 interface Props {
   initialState?: unknown;
   showAdvanced: boolean;
+  toolboxBlockScale?: number;
   onChange: (state: unknown, python: string) => void;
 }
 
-export function BlocklyView({ initialState, showAdvanced, onChange }: Props) {
+/**
+ * Rewrite each toolbox category row to a Scratch-style chip:
+ *   colored circle on top, label below. Blockly sets the row's inline
+ *   background-color to the category colour; we copy that onto the icon
+ *   span and clear the row's own bg so the label sits on a neutral chip.
+ */
+function styleToolboxCategories(host: HTMLElement) {
+  const rows = host.querySelectorAll<HTMLElement>(".blocklyTreeRow");
+  rows.forEach((row) => {
+    const inline = row.style.backgroundColor;
+    if (inline && inline !== "transparent" && !row.dataset.chipDone) {
+      const icon = row.querySelector<HTMLElement>(".blocklyTreeIcon");
+      if (icon) icon.style.backgroundColor = inline;
+      row.dataset.chipDone = "1";
+      row.style.backgroundColor = "transparent";
+    }
+  });
+}
+
+function applyFlyoutScale(workspace: Blockly.WorkspaceSvg, scale: number) {
+  const flyout = workspace.getFlyout();
+  if (!flyout) return;
+  // Override the per-instance scale getter so category re-shows respect it.
+  (flyout as unknown as { getFlyoutScale: () => number }).getFlyoutScale = () => scale;
+  const inner = flyout.getWorkspace();
+  inner.setScale(scale);
+  try {
+    (flyout as unknown as { reflow?: () => void }).reflow?.();
+    (flyout as unknown as { position?: () => void }).position?.();
+  } catch { /* ignore */ }
+}
+
+export function BlocklyView({ initialState, showAdvanced, toolboxBlockScale = 1, onChange }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<Blockly.WorkspaceSvg | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const scaleRef = useRef(toolboxBlockScale);
+  scaleRef.current = toolboxBlockScale;
 
   useEffect(() => {
     if (!hostRef.current) return;
-    const workspace = Blockly.inject(hostRef.current, {
+    const host = hostRef.current;
+    const workspace = Blockly.inject(host, {
       toolbox: buildToolbox(showAdvanced),
       renderer: "zelos",
       theme: friendlyTheme,
@@ -47,19 +83,50 @@ export function BlocklyView({ initialState, showAdvanced, onChange }: Props) {
     workspace.addChangeListener(listener);
     // Fire once for initial preview.
     queueMicrotask(listener);
+
+    // Initial toolbox chip styling + flyout scale.
+    const restyle = () => {
+      styleToolboxCategories(host);
+      applyFlyoutScale(workspace, scaleRef.current);
+    };
+    queueMicrotask(restyle);
+
+    // Re-apply chip styling if Blockly rewrites tree row bg (e.g. selection).
+    const toolboxDiv = host.querySelector<HTMLElement>(".blocklyToolboxDiv");
+    const observer = toolboxDiv
+      ? new MutationObserver(() => styleToolboxCategories(host))
+      : null;
+    observer?.observe(toolboxDiv!, { attributes: true, attributeFilter: ["style"], subtree: true, childList: true });
+
     return () => {
+      observer?.disconnect();
       workspace.removeChangeListener(listener);
       workspace.dispose();
       workspaceRef.current = null;
     };
-    // Intentionally do not re-inject on every prop change — see toolbox effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Rebuild toolbox when advanced toggle changes.
+  // Rebuild toolbox when advanced toggle changes; re-apply chip + flyout scale.
   useEffect(() => {
-    workspaceRef.current?.updateToolbox(buildToolbox(showAdvanced));
+    const ws = workspaceRef.current;
+    const host = hostRef.current;
+    if (!ws || !host) return;
+    ws.updateToolbox(buildToolbox(showAdvanced));
+    queueMicrotask(() => {
+      // Reset the flag so new rows get chip styling.
+      host.querySelectorAll<HTMLElement>(".blocklyTreeRow[data-chip-done]").forEach((r) => delete r.dataset.chipDone);
+      styleToolboxCategories(host);
+      applyFlyoutScale(ws, scaleRef.current);
+    });
   }, [showAdvanced]);
+
+  // Apply flyout block scale when setting changes.
+  useEffect(() => {
+    const ws = workspaceRef.current;
+    if (!ws) return;
+    applyFlyoutScale(ws, toolboxBlockScale);
+  }, [toolboxBlockScale]);
 
   return <div ref={hostRef} style={{ width: "100%", height: "100%" }} />;
 }
