@@ -9,6 +9,7 @@ interface Props {
 
 export function Header({ onOpenSettings }: Props) {
   const { project, setProject } = useApp();
+  const dark = project.type === "python";
 
   const rename = (e: React.ChangeEvent<HTMLInputElement>) => {
     setProject({ ...project, title: e.target.value });
@@ -45,13 +46,47 @@ export function Header({ onOpenSettings }: Props) {
     useApp.getState().updateSettings({ showAdvanced: !project.settings.showAdvanced });
   };
 
+  const headerBg = dark ? "#0b1216" : "#0e7490";
+  const headerBorder = dark ? "#164e63" : "#155e75";
+  const inputBg = dark ? "#111a20" : "#ffffff";
+  const inputColor = dark ? "#dff5fb" : "#0b3b48";
+  const inputBorder = dark ? "#164e63" : "#b6dbe4";
+
+  const btnStyle: React.CSSProperties = {
+    padding: "4px 12px",
+    border: dark ? "1px solid #164e63" : "1px solid rgba(255,255,255,0.4)",
+    background: dark ? "#111a20" : "rgba(255,255,255,0.12)",
+    color: "#ffffff",
+    cursor: "pointer",
+    borderRadius: 6,
+    fontWeight: 600,
+  };
+
   return (
-    <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", background: "#0f0f10", color: "#eee", borderBottom: "1px solid #333" }}>
-      <strong>LEGO-Hub-blocks</strong>
+    <header
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "8px 14px",
+        background: headerBg,
+        color: "#ffffff",
+        borderBottom: `1px solid ${headerBorder}`,
+      }}
+    >
+      <strong style={{ letterSpacing: 0.4 }}>LEGO-Hub-blocks</strong>
       <input
         value={project.title}
         onChange={rename}
-        style={{ background: "#222", color: "#eee", border: "1px solid #444", padding: "4px 8px", borderRadius: 4, width: 220 }}
+        style={{
+          background: inputBg,
+          color: inputColor,
+          border: `1px solid ${inputBorder}`,
+          padding: "4px 8px",
+          borderRadius: 6,
+          width: 220,
+          outline: "none",
+        }}
         aria-label="project title"
       />
       <button type="button" onClick={toggleType} style={btnStyle}>
@@ -68,12 +103,3 @@ export function Header({ onOpenSettings }: Props) {
     </header>
   );
 }
-
-const btnStyle: React.CSSProperties = {
-  padding: "4px 10px",
-  border: "1px solid #444",
-  background: "#2a2a2a",
-  color: "#eee",
-  cursor: "pointer",
-  borderRadius: 4,
-};

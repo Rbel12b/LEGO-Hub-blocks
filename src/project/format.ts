@@ -9,6 +9,8 @@ export interface ProjectSettings {
   autoreloadInLive: boolean;
   lspMode: LspMode;
   lspRemoteUrl: string;
+  /** Fixed scale for blocks in the flyout (toolbox). 1.0 = default Blockly size. */
+  toolboxBlockScale: number;
 }
 
 export const DEFAULT_SETTINGS: ProjectSettings = {
@@ -18,6 +20,7 @@ export const DEFAULT_SETTINGS: ProjectSettings = {
   autoreloadInLive: false,
   lspMode: "worker",
   lspRemoteUrl: "ws://localhost:3001",
+  toolboxBlockScale: 0.75,
 };
 
 export interface BlocksProject {

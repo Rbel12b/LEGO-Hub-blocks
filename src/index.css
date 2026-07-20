@@ -1,8 +1,24 @@
 *, *::before, *::after { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; padding: 0; }
+html, body, #root { height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden; }
 body {
   font: 14px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif;
-  color: #eee;
-  background: #0f0f10;
+  color: #0b3b48;
+  background: #f4fafc;
 }
 button { font: inherit; }
+
+:root {
+  --cyan-100: #cceff6;
+  --cyan-200: #67e8f9;
+  --cyan-500: #0891b2;
+  --cyan-600: #0e7490;
+  --cyan-700: #155e75;
+  --cyan-800: #164e63;
+  --cyan-900: #0b3b48;
+  --ink-950: #06090b;
+  --ink-900: #0b1216;
+  --ink-800: #111a20;
+  --ink-700: #1a2830;
+  --panel-bg: #ffffff;
+  --panel-border: #b6dbe4;
+}

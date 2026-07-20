@@ -1,11 +1,14 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useApp } from "../state/store";
 import { BlocklyView } from "./BlocklyView";
 import { MonacoView } from "../editor/MonacoView";
 import { ConsolePanel } from "./ConsolePanel";
+import { Drawer, DRAWER_HANDLE } from "./Drawer";
 
 export function Workspace() {
   const { project, setProject, setPythonPreview, pythonPreview } = useApp();
+  const [pySize, setPySize] = useState(0);
+  const [conSize, setConSize] = useState(0);
 
   const onBlockChange = useCallback(
     (state: unknown, python: string) => {
@@ -23,33 +26,65 @@ export function Workspace() {
     setProject({ ...project, source });
   };
 
+  // Blockly + Monaco recompute layout on window resize; nudge them when
+  // drawers open/close so the workspace fills correctly.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+    return () => cancelAnimationFrame(id);
+  }, [pySize, conSize, project.type]);
+
   if (project.type === "blocks") {
+    const rightCol = pySize + DRAWER_HANDLE;
+    const bottomRow = conSize + DRAWER_HANDLE;
     return (
-      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gridTemplateRows: "1fr 30%", height: "100%", gap: 1, background: "#333" }}>
-        <div style={{ background: "#f0f0f0" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `1fr ${rightCol}px`,
+          gridTemplateRows: `1fr ${bottomRow}px`,
+          height: "100%",
+          background: "#e0eff4",
+        }}
+      >
+        <div style={{ background: "#ffffff", overflow: "hidden", minWidth: 0, minHeight: 0 }}>
           <BlocklyView
             initialState={project.workspace}
             showAdvanced={project.settings.showAdvanced}
+            toolboxBlockScale={project.settings.toolboxBlockScale}
             onChange={onBlockChange}
           />
         </div>
-        <div style={{ background: "#1e1e1e" }}>
-          <MonacoView value={pythonPreview} readOnly />
+        <div style={{ gridRow: "1 / span 2", gridColumn: 2, minWidth: 0, minHeight: 0 }}>
+          <Drawer side="right" label="Python" storageKey="drawer.python" defaultSize={360} onSizeChange={setPySize}>
+            <MonacoView value={pythonPreview} readOnly />
+          </Drawer>
         </div>
-        <div style={{ gridColumn: "1 / span 2" }}>
-          <ConsolePanel />
+        <div style={{ gridRow: 2, gridColumn: 1, minWidth: 0, minHeight: 0 }}>
+          <Drawer side="bottom" label="Console" storageKey="drawer.console" defaultSize={200} onSizeChange={setConSize}>
+            <ConsolePanel />
+          </Drawer>
         </div>
       </div>
     );
   }
 
+  const bottomRow = conSize + DRAWER_HANDLE;
   return (
-    <div style={{ display: "grid", gridTemplateRows: "1fr 30%", height: "100%", gap: 1, background: "#333" }}>
-      <div style={{ background: "#1e1e1e" }}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateRows: `1fr ${bottomRow}px`,
+        height: "100%",
+        background: "#06090b",
+      }}
+    >
+      <div style={{ background: "#0b1216", minWidth: 0, minHeight: 0 }}>
         <MonacoView value={project.source} onChange={onPythonChange} />
       </div>
-      <div>
-        <ConsolePanel />
+      <div style={{ minWidth: 0, minHeight: 0 }}>
+        <Drawer side="bottom" label="Console" storageKey="drawer.console" defaultSize={220} dark onSizeChange={setConSize}>
+          <ConsolePanel />
+        </Drawer>
       </div>
     </div>
   );
