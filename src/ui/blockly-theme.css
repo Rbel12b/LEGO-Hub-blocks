@@ -1,86 +1,112 @@
-/* Scratch-inspired toolbox: narrow left column, colored circle chip with
-   short label beneath. Category color comes from the row background that
-   Blockly sets inline; we shape it into a chip. */
+/* Scratch-inspired toolbox. Blockly current DOM:
+     .blocklyToolboxCategory              (row; bg set inline to category colour)
+       .blocklyTreeRowContentContainer
+         .blocklyToolboxCategoryIcon      (empty span — we colour this as circle)
+         .blocklyToolboxCategoryLabel     (text)
+   BlocklyView.tsx JS copies the row's inline background-color onto the icon
+   and clears the row so text sits on a neutral chip.
+*/
 
 .blocklyToolboxDiv {
   background: #ffffff !important;
   padding: 8px 0 !important;
   border-right: 1px solid #d6eef5;
   box-shadow: inset -4px 0 8px -6px rgba(0, 100, 130, 0.12);
-  width: 74px !important;
-  min-width: 74px !important;
+  width: 78px !important;
+  min-width: 78px !important;
+  overflow-x: hidden !important;
 }
 
-.blocklyToolboxCategoryGroup {
-  padding: 0 !important;
-}
-
-/* Category row → chip. Stack circle + label vertically. */
-.blocklyTreeRow {
+/* Category row = chip. */
+.blocklyToolboxCategory {
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 2px !important;
-  width: 62px !important;
-  height: 62px !important;
-  margin: 6px auto !important;
-  padding: 6px 4px !important;
-  border-radius: 12px !important;
+  width: 58px !important;
+  height: 46px !important;
+  margin: 1px auto !important;
+  padding: 2px !important;
+  border-radius: 8px !important;
   background: transparent !important;
   border: 2px solid transparent !important;
   cursor: pointer;
+  gap: 0 !important;
   transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease;
 }
 
-.blocklyTreeRow:hover {
-  background: rgba(0, 179, 230, 0.08) !important;
+.blocklyToolboxCategory:hover {
+  background: rgba(14, 116, 144, 0.08) !important;
   transform: translateY(-1px);
 }
 
-.blocklyTreeSelected {
-  background: rgba(0, 179, 230, 0.14) !important;
+.blocklyToolboxSelected {
+  background: rgba(14, 116, 144, 0.16) !important;
   border-color: #0e7490 !important;
 }
 
-/* Small colored circle. BlocklyView copies row's inline bg-color onto this
-   span in JS so the circle carries the category colour, and the row itself
-   stays neutral (chip). */
-.blocklyTreeIcon {
-  width: 32px !important;
-  height: 32px !important;
+/* Content wrapper: stack icon + label vertically. */
+.blocklyTreeRowContentContainer {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 1px !important;
+  width: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* Colored circle. BlocklyView sets background-color in JS from row inline bg.
+   Blockly's default gives this element `visibility: hidden` when no sprite is
+   attached — force it visible. */
+.blocklyToolboxCategoryIcon {
+  visibility: visible !important;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  min-height: 18px !important;
   border-radius: 50% !important;
-  border: 2px solid rgba(0, 0, 0, 0.15) !important;
+  border: 1.5px solid rgba(0, 0, 0, 0.2) !important;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
   display: block !important;
   background-image: none !important;
-  flex-shrink: 0;
+  background-repeat: no-repeat !important;
+  flex-shrink: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
-/* Label under the circle: small, dark, high-contrast on white. */
-.blocklyTreeLabel {
+/* Label under the circle. */
+.blocklyToolboxCategoryLabel {
   font-family: system-ui, "Segoe UI", Roboto, sans-serif !important;
-  font-size: 11px !important;
+  font-size: 9px !important;
   font-weight: 700 !important;
   color: #0b3b48 !important;
   text-shadow: none !important;
-  letter-spacing: 0.2px;
-  line-height: 1;
-  text-align: center;
-  max-width: 60px;
+  letter-spacing: 0.1px !important;
+  line-height: 1 !important;
+  text-align: center !important;
+  max-width: 58px !important;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding: 0 !important;
+  margin: 0 !important;
 }
 
-/* Separator between block-categories and Standard categories. */
+/* Divider between block-categories and Standard categories. */
 .blocklyTreeSeparator {
   border-top: 1px solid #d6eef5 !important;
-  margin: 6px 10px !important;
+  border-bottom: none !important;
+  border-right: none !important;
+  margin: 6px 12px !important;
   height: 0 !important;
+  width: auto !important;
+  padding: 0 !important;
 }
 
-/* Flyout (opens when a category is picked). */
+/* Flyout background. */
 .blocklyFlyoutBackground {
   fill: #f6fbfd !important;
   fill-opacity: 0.98 !important;
@@ -90,7 +116,7 @@
   fill: #8ed3e6;
 }
 
-/* Main workspace background — unchanged (kept light). */
+/* Workspace bg + grid. */
 .blocklyMainBackground {
   stroke-width: 0 !important;
   fill: #fbf7ee !important;

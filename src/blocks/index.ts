@@ -32,6 +32,14 @@ export function registerAllBlocks(): void {
     ...LVGL_BLOCKS,
   ];
   Blockly.defineBlocksWithJsonArray(defs as unknown as object[]);
+  // Strip the leading/trailing quote glyphs from the built-in `text` block by
+  // replacing Blockly's "text_quotes" extension with a no-op. Extension is
+  // applied per-instance during init; unregistering the original prevents the
+  // quote image fields from being inserted.
+  if (Blockly.Extensions.isRegistered("text_quotes")) {
+    Blockly.Extensions.unregister("text_quotes");
+  }
+  Blockly.Extensions.register("text_quotes", function () { /* no quotes */ });
   registerHubGenerators(pythonGenerator);
   registerMotorGenerators(pythonGenerator);
   registerSensorGenerators(pythonGenerator);

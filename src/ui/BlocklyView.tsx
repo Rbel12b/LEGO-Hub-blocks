@@ -22,15 +22,18 @@ interface Props {
  *   span and clear the row's own bg so the label sits on a neutral chip.
  */
 function styleToolboxCategories(host: HTMLElement) {
-  const rows = host.querySelectorAll<HTMLElement>(".blocklyTreeRow");
+  const rows = host.querySelectorAll<HTMLElement>(".blocklyToolboxCategory");
   rows.forEach((row) => {
-    const inline = row.style.backgroundColor;
-    if (inline && inline !== "transparent" && !row.dataset.chipDone) {
-      const icon = row.querySelector<HTMLElement>(".blocklyTreeIcon");
-      if (icon) icon.style.backgroundColor = inline;
-      row.dataset.chipDone = "1";
-      row.style.backgroundColor = "transparent";
+    // Blockly stores the category colour in borderLeft ("Nx solid <color>")
+    // for LTR, borderRight for RTL. Capture once and mirror onto the icon.
+    if (!row.dataset.categoryColor) {
+      const src = row.style.borderLeftColor || row.style.borderRightColor;
+      if (src) row.dataset.categoryColor = src;
     }
+    const color = row.dataset.categoryColor;
+    if (!color) return;
+    const icon = row.querySelector<HTMLElement>(".blocklyToolboxCategoryIcon");
+    if (icon && icon.style.backgroundColor !== color) icon.style.backgroundColor = color;
   });
 }
 
@@ -115,7 +118,7 @@ export function BlocklyView({ initialState, showAdvanced, toolboxBlockScale = 1,
     ws.updateToolbox(buildToolbox(showAdvanced));
     queueMicrotask(() => {
       // Reset the flag so new rows get chip styling.
-      host.querySelectorAll<HTMLElement>(".blocklyTreeRow[data-chip-done]").forEach((r) => delete r.dataset.chipDone);
+      host.querySelectorAll<HTMLElement>(".blocklyToolboxCategory[data-category-color]").forEach((r) => delete r.dataset.categoryColor);
       styleToolboxCategories(host);
       applyFlyoutScale(ws, scaleRef.current);
     });
