@@ -22,7 +22,7 @@ export default function App() {
   }, []);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: project.type === "python" ? "#06090b" : "#eaf4f7" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden", background: project.type === "python" ? "#06090b" : "#eaf4f7" }}>
       <Header onOpenSettings={() => setShowSettings(true)} />
       <DeviceBar />
       <div style={{ flex: 1, minHeight: 0 }}>
