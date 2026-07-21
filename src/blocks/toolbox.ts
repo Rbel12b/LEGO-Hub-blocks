@@ -68,7 +68,7 @@ const STANDARD_CATEGORIES = [
   {
     kind: "category",
     name: "Logic",
-    colour: "210",
+    categorystyle: "logic_category",
     contents: [
       { kind: "block", type: "controls_if" },
       {
@@ -87,7 +87,7 @@ const STANDARD_CATEGORIES = [
   {
     kind: "category",
     name: "Loops",
-    colour: "120",
+    categorystyle: "loop_category",
     contents: [
       {
         kind: "block",
@@ -109,7 +109,7 @@ const STANDARD_CATEGORIES = [
   {
     kind: "category",
     name: "Math",
-    colour: "230",
+    categorystyle: "math_category",
     contents: [
       { kind: "block", type: "math_number" },
       {
@@ -146,7 +146,7 @@ const STANDARD_CATEGORIES = [
   {
     kind: "category",
     name: "Text",
-    colour: "160",
+    categorystyle: "text_category",
     contents: [
       { kind: "block", type: "text" },
       {
@@ -160,11 +160,11 @@ const STANDARD_CATEGORIES = [
   {
     kind: "category",
     name: "Lists",
-    colour: "260",
+    categorystyle: "list_category",
     contents: ["lists_create_with", "lists_length", "lists_getIndex"].map((t) => ({ kind: "block", type: t })),
   },
-  { kind: "category", name: "Variables", colour: "330", custom: "VARIABLE" },
-  { kind: "category", name: "Functions", colour: "290", custom: "PROCEDURE" },
+  { kind: "category", name: "Variables", categorystyle: "variable_category", custom: "VARIABLE" },
+  { kind: "category", name: "Functions", categorystyle: "procedure_category", custom: "PROCEDURE" },
 ];
 
 function categoryOf(defs: readonly ToolboxDef[], name: string, colour: string, showAdvanced: boolean) {
