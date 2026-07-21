@@ -47,12 +47,26 @@ export class RawRepl {
 
   /** Kill any running program and re-enter raw REPL. */
   async enterRawRepl(): Promise<void> {
+    // Two rounds of Ctrl-C: first may be swallowed if the device is busy in
+    // native code (e.g. LVGL render loop on fresh USB attach). Second lands
+    // once the main-loop yields.
     await this.transport.write(new Uint8Array([0x0d, CTRL_C, CTRL_C]));
-    // small settle
-    await this.drainFor(50);
+    await this.drainFor(100);
+    await this.transport.write(new Uint8Array([CTRL_C, CTRL_C]));
+    await this.drainFor(200);
     this.rxBuf = new Uint8Array(0);
     await this.transport.write(new Uint8Array([0x0d, CTRL_A]));
-    await this.waitFor(RAW_BANNER, 3000);
+    try {
+      await this.waitFor(RAW_BANNER, 5000);
+    } catch {
+      // Retry once — device may have been mid-frame.
+      this.rxBuf = new Uint8Array(0);
+      await this.transport.write(new Uint8Array([CTRL_C, CTRL_C]));
+      await this.drainFor(200);
+      this.rxBuf = new Uint8Array(0);
+      await this.transport.write(new Uint8Array([0x0d, CTRL_A]));
+      await this.waitFor(RAW_BANNER, 5000);
+    }
     this.bootstrapped = true;
   }
 

@@ -15,10 +15,11 @@ export function DeviceBar() {
   const connect = async (kind: "ble" | "serial" | "mock") => {
     setBusy(true);
     setConnection("connecting");
+    let client: DeviceClient | null = null;
     try {
       const transport =
         kind === "ble" ? new BleTransport() : kind === "serial" ? new SerialTransport() : new MockTransport();
-      const client = new DeviceClient(transport);
+      client = new DeviceClient(transport);
       transport.onData(() => {
         // Chunks are consumed by RawRepl; do not double-log.
       });
@@ -35,6 +36,9 @@ export function DeviceBar() {
     } catch (e) {
       setConnection("error", (e as Error).message);
       appendConsole("err", `[connect failed: ${(e as Error).message}]\n`);
+      if (client) {
+        try { await client.disconnect(); } catch { /* noop */ }
+      }
     } finally {
       setBusy(false);
     }
