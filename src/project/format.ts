@@ -70,6 +70,6 @@ export function newPythonProject(title = "Untitled"): PythonProject {
     title,
     createdAt: new Date().toISOString(),
     settings: { ...DEFAULT_SETTINGS },
-    source: "# lego-hub-blocks: python v1\n",
+    source: "",
   };
 }
