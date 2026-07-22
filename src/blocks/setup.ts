@@ -1,7 +1,12 @@
 import type { PythonGenerator } from "blockly/python";
 
 export type Port = "A" | "B" | "C" | "D";
-export type DeviceKind = "color_sensor" | "distance_sensor" | "color_distance_sensor";
+export type DeviceKind =
+  | "color_sensor"
+  | "distance_sensor"
+  | "color_distance_sensor"
+  | "motor"
+  | "basic_motor";
 
 /** Metadata registered per port during generator dispatch. */
 interface Registration {

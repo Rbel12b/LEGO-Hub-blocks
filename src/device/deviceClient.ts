@@ -66,6 +66,29 @@ export class DeviceClient {
     await this.repl.interrupt();
   }
 
+  /**
+   * Read a file from the device and return its text contents. Uses raw REPL
+   * exec of a base64 read snippet so binary safety isn't required for the
+   * .py sources we expect. Path is not validated here (device rejects invalid).
+   */
+  async readFile(path: string, opts: { timeoutMs?: number } = {}): Promise<string> {
+    await this.repl.enterRawRepl();
+    try {
+      const snippet = [
+        `import sys`,
+        `_p = ${JSON.stringify(path)}`,
+        `with open(_p, "rb") as _f:`,
+        `    sys.stdout.buffer.write(_f.read())`,
+        ``,
+      ].join("\n");
+      const result = await this.repl.exec(snippet, { timeoutMs: opts.timeoutMs ?? 15000 });
+      if (result.stderr) throw new Error(result.stderr.trim());
+      return result.stdout;
+    } finally {
+      await this.repl.softReset();
+    }
+  }
+
   async upload(path: string, bytes: Uint8Array, opts: UploadRunOptions): Promise<UploadResult> {
     await this.repl.enterRawRepl();
     try {

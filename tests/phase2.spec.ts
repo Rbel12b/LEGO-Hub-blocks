@@ -53,10 +53,11 @@ describe("Phase 2 blocks", () => {
       }),
     );
     const py = workspaceToPython(ws);
-    expect(py).toContain("hub.ports.A.setAccTime(500, 1)");
+    expect(py).toContain("isinstance(dev_a, devices.motor)");
+    expect(py).toContain("dev_a.setAccTime(500, 1)");
   });
 
-  it("emits basic_motor_power via direct-port startPower", () => {
+  it("emits basic_motor_power via typed-device startPower", () => {
     const ws = makeWorkspace(
       underHat({
         type: "basic_motor_power",
@@ -65,7 +66,8 @@ describe("Phase 2 blocks", () => {
       }),
     );
     const py = workspaceToPython(ws);
-    expect(py).toContain("hub.ports.B.startPower(75)");
+    expect(py).toContain("isinstance(dev_b, devices.basic_motor)");
+    expect(py).toContain("dev_b.startPower(75)");
   });
 
   it("LVGL setup includes import and screen_active", () => {
