@@ -1,22 +1,30 @@
 /**
  * Best-effort Python → Blockly translator used when switching a Python project
- * back to Blocks mode. Lines that match one of the patterns emitted by our own
- * generators become the corresponding block; lines that don't match are
- * buffered into `raw_python` blocks between the recognized ones so nothing is
- * silently lost.
+ * back to Blocks mode. Handles:
  *
- * Device setup boilerplate (`dev_x = hub.ports.X.device()`, isinstance guard,
- * `setMode`) is only dropped when every reference to `dev_x` translates to a
- * known block. Otherwise the whole setup + uses are preserved as raw Python so
- * the generated program still runs.
+ * - Hub-level statements (LED, buttons, IMU, LCD, log).
+ * - Motor + sensor blocks via typed-device setup groups.
+ * - Control flow: `if/elif/else`, `while`, `for X in range(...)`.
+ * - `print(...)`, simple `NAME = expr` assignments.
+ * - Expressions: numbers, strings, booleans, variables, `+ - * / % **`,
+ *   comparisons (`== != < > <= >=`), `and/or/not`, list literals `[a,b,c]`,
+ *   `len(x)`, unary minus, parenthesized groups.
+ *
+ * Anything unsupported becomes a `raw_python` block so the code still runs.
  */
 
 export interface BlockSpec {
   type: string;
-  fields?: Record<string, string>;
+  fields?: Record<string, unknown>;
   inputs?: Record<string, { block?: BlockSpec; shadow?: BlockSpec }>;
   data?: string;
+  extraState?: unknown;
   next?: { block: BlockSpec };
+}
+
+export interface Translation {
+  chain: BlockSpec | undefined;
+  variables: { name: string; id: string }[];
 }
 
 const COLOR_NAMES = new Set([
@@ -40,69 +48,334 @@ const DEVICE_KINDS = new Set<DeviceKind>([
   "basic_motor",
 ]);
 
-function numInput(name: string, expr: string) {
-  return { [name]: { shadow: { type: "math_number", fields: { NUM: expr } } } };
+// ---------------------------------------------------------------------------
+// Expression tokenizer + parser
+// ---------------------------------------------------------------------------
+
+type ETok = { kind: "NUM" | "STR" | "NAME" | "KW" | "OP"; value: string };
+
+const KEYWORDS = new Set(["and", "or", "not", "True", "False", "None", "in", "is"]);
+
+function lexExpr(src: string): ETok[] | null {
+  const toks: ETok[] = [];
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === " " || c === "\t") { i++; continue; }
+    if (c >= "0" && c <= "9") {
+      let j = i;
+      while (j < src.length && /[0-9.]/.test(src[j])) j++;
+      toks.push({ kind: "NUM", value: src.slice(i, j) });
+      i = j; continue;
+    }
+    if (/[A-Za-z_]/.test(c)) {
+      let j = i;
+      while (j < src.length && /[A-Za-z0-9_]/.test(src[j])) j++;
+      const w = src.slice(i, j);
+      toks.push({ kind: KEYWORDS.has(w) ? "KW" : "NAME", value: w });
+      i = j; continue;
+    }
+    if (c === "'" || c === '"') {
+      const q = c;
+      let j = i + 1;
+      let value = "";
+      while (j < src.length && src[j] !== q) {
+        if (src[j] === "\\" && j + 1 < src.length) {
+          const esc = src[j + 1];
+          if (esc === "n") value += "\n";
+          else if (esc === "t") value += "\t";
+          else value += esc;
+          j += 2;
+        } else {
+          value += src[j];
+          j++;
+        }
+      }
+      if (j >= src.length) return null;
+      toks.push({ kind: "STR", value });
+      i = j + 1; continue;
+    }
+    const two = src.slice(i, i + 2);
+    if (["**", "//", "==", "!=", "<=", ">="].includes(two)) {
+      toks.push({ kind: "OP", value: two });
+      i += 2; continue;
+    }
+    if ("+-*/%<>()[],.=".includes(c)) {
+      toks.push({ kind: "OP", value: c });
+      i++; continue;
+    }
+    return null;
+  }
+  return toks;
 }
 
-/** Stateless top-level statements — no device variable involved. */
-function matchStatement(line: string): BlockSpec | null {
-  let m: RegExpExecArray | null;
-
-  if ((m = /^hub\.ports\.LED\.setRgbColorIdx\(lpf2\.color\.([A-Z]+)\)$/.exec(line))) {
-    if (COLOR_NAMES.has(m[1])) return { type: "hub_led_color", fields: { COLOR: m[1] } };
+class ExprParser {
+  pos = 0;
+  private toks: ETok[];
+  private vars: Set<string>;
+  constructor(toks: ETok[], vars: Set<string>) {
+    this.toks = toks;
+    this.vars = vars;
   }
 
-  if ((m = /^hub\.ports\.LED\.setRgbColor\(\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\)$/.exec(line))) {
-    return {
-      type: "hub_led_rgb",
-      inputs: { ...numInput("R", m[1]), ...numInput("G", m[2]), ...numInput("B", m[3]) },
+  peek(o = 0): ETok | undefined { return this.toks[this.pos + o]; }
+  match(kind: string, value?: string): boolean {
+    const t = this.peek();
+    return !!t && t.kind === kind && (value === undefined || t.value === value);
+  }
+  eat(kind: string, value?: string): boolean {
+    if (this.match(kind, value)) { this.pos++; return true; }
+    return false;
+  }
+  atEnd(): boolean { return this.pos >= this.toks.length; }
+
+  parse(): BlockSpec | null {
+    const r = this.parseOr();
+    if (!r || !this.atEnd()) return null;
+    return r;
+  }
+
+  parseOr(): BlockSpec | null {
+    let left = this.parseAnd();
+    if (!left) return null;
+    while (this.match("KW", "or")) {
+      this.pos++;
+      const right = this.parseAnd();
+      if (!right) return null;
+      left = {
+        type: "logic_operation",
+        fields: { OP: "OR" },
+        inputs: { A: { block: left }, B: { block: right } },
+      };
+    }
+    return left;
+  }
+  parseAnd(): BlockSpec | null {
+    let left = this.parseNot();
+    if (!left) return null;
+    while (this.match("KW", "and")) {
+      this.pos++;
+      const right = this.parseNot();
+      if (!right) return null;
+      left = {
+        type: "logic_operation",
+        fields: { OP: "AND" },
+        inputs: { A: { block: left }, B: { block: right } },
+      };
+    }
+    return left;
+  }
+  parseNot(): BlockSpec | null {
+    if (this.match("KW", "not")) {
+      this.pos++;
+      const arg = this.parseNot();
+      if (!arg) return null;
+      return { type: "logic_negate", inputs: { BOOL: { block: arg } } };
+    }
+    return this.parseCompare();
+  }
+  parseCompare(): BlockSpec | null {
+    const left = this.parseAdd();
+    if (!left) return null;
+    const cmpMap: Record<string, string> = {
+      "==": "EQ", "!=": "NEQ", "<": "LT", "<=": "LTE", ">": "GT", ">=": "GTE",
     };
+    const t = this.peek();
+    if (t && t.kind === "OP" && cmpMap[t.value]) {
+      this.pos++;
+      const right = this.parseAdd();
+      if (!right) return null;
+      return {
+        type: "logic_compare",
+        fields: { OP: cmpMap[t.value] },
+        inputs: { A: { block: left }, B: { block: right } },
+      };
+    }
+    return left;
   }
-
-  if (line === "hub.buttons.poll()") return { type: "hub_button_poll" };
-  if (line === "hub.imu.reset()") return { type: "hub_imu_reset" };
-  if (line === "hub.powerOff()") return { type: "hub_poweroff" };
-
-  if ((m = /^hub\.log\.setLevel\((\d)\)$/.exec(line))) {
-    if (LOG_LEVELS.has(m[1])) return { type: "hub_log_level", fields: { LEVEL: m[1] } };
+  parseAdd(): BlockSpec | null {
+    let left = this.parseMul();
+    if (!left) return null;
+    while (true) {
+      if (this.match("OP", "+")) {
+        this.pos++;
+        const right = this.parseMul();
+        if (!right) return null;
+        left = { type: "math_arithmetic", fields: { OP: "ADD" }, inputs: { A: { block: left }, B: { block: right } } };
+      } else if (this.match("OP", "-")) {
+        this.pos++;
+        const right = this.parseMul();
+        if (!right) return null;
+        left = { type: "math_arithmetic", fields: { OP: "MINUS" }, inputs: { A: { block: left }, B: { block: right } } };
+      } else break;
+    }
+    return left;
   }
-
-  if ((m = /^hub\.lcd\.(on|off)\(\)$/.exec(line))) {
-    return { type: "hub_lcd_backlight", fields: { STATE: m[1] } };
+  parseMul(): BlockSpec | null {
+    let left = this.parseUnary();
+    if (!left) return null;
+    while (true) {
+      if (this.match("OP", "*")) {
+        this.pos++;
+        const right = this.parseUnary();
+        if (!right) return null;
+        left = { type: "math_arithmetic", fields: { OP: "MULTIPLY" }, inputs: { A: { block: left }, B: { block: right } } };
+      } else if (this.match("OP", "/")) {
+        this.pos++;
+        const right = this.parseUnary();
+        if (!right) return null;
+        left = { type: "math_arithmetic", fields: { OP: "DIVIDE" }, inputs: { A: { block: left }, B: { block: right } } };
+      } else if (this.match("OP", "%")) {
+        this.pos++;
+        const right = this.parseUnary();
+        if (!right) return null;
+        left = { type: "math_modulo", inputs: { DIVIDEND: { block: left }, DIVISOR: { block: right } } };
+      } else break;
+    }
+    return left;
   }
-
-  if ((m = /^hub\.lcd\.backlight\((-?\d+)\)$/.exec(line))) {
-    return { type: "hub_lcd_backlight_duty", inputs: numInput("DUTY", m[1]) };
+  parseUnary(): BlockSpec | null {
+    if (this.match("OP", "-")) {
+      this.pos++;
+      const arg = this.parseUnary();
+      if (!arg) return null;
+      return { type: "math_single", fields: { OP: "NEG" }, inputs: { NUM: { block: arg } } };
+    }
+    if (this.match("OP", "+")) {
+      this.pos++;
+      return this.parseUnary();
+    }
+    return this.parsePow();
   }
-
-  if ((m = /^hub\.lcd\.fill\((-?\d+)\)$/.exec(line))) {
-    return { type: "hub_lcd_fill", inputs: numInput("COLOR", m[1]) };
+  parsePow(): BlockSpec | null {
+    const base = this.parseAtom();
+    if (!base) return null;
+    if (this.match("OP", "**")) {
+      this.pos++;
+      const exp = this.parseUnary();
+      if (!exp) return null;
+      return { type: "math_arithmetic", fields: { OP: "POWER" }, inputs: { A: { block: base }, B: { block: exp } } };
+    }
+    return base;
   }
+  parseAtom(): BlockSpec | null {
+    const t = this.peek();
+    if (!t) return null;
+    if (t.kind === "NUM") { this.pos++; return { type: "math_number", fields: { NUM: t.value } }; }
+    if (t.kind === "STR") { this.pos++; return { type: "text", fields: { TEXT: t.value } }; }
+    if (t.kind === "KW" && (t.value === "True" || t.value === "False")) {
+      this.pos++;
+      return { type: "logic_boolean", fields: { BOOL: t.value.toUpperCase() } };
+    }
+    if (t.kind === "OP" && t.value === "(") {
+      this.pos++;
+      const inner = this.parseOr();
+      if (!inner) return null;
+      if (!this.eat("OP", ")")) return null;
+      return inner;
+    }
+    if (t.kind === "OP" && t.value === "[") {
+      this.pos++;
+      const items: BlockSpec[] = [];
+      if (!this.match("OP", "]")) {
+        while (true) {
+          const item = this.parseOr();
+          if (!item) return null;
+          items.push(item);
+          if (this.match("OP", ",")) { this.pos++; continue; }
+          break;
+        }
+      }
+      if (!this.eat("OP", "]")) return null;
+      const inputs: BlockSpec["inputs"] = {};
+      items.forEach((it, i) => { inputs![`ADD${i}`] = { block: it }; });
+      return {
+        type: "lists_create_with",
+        extraState: { itemCount: items.length },
+        inputs,
+      };
+    }
+    if (t.kind === "NAME") {
+      const name = t.value;
+      this.pos++;
+      if (this.match("OP", "(")) {
+        this.pos++;
+        const args: BlockSpec[] = [];
+        if (!this.match("OP", ")")) {
+          while (true) {
+            const a = this.parseOr();
+            if (!a) return null;
+            args.push(a);
+            if (this.match("OP", ",")) { this.pos++; continue; }
+            break;
+          }
+        }
+        if (!this.eat("OP", ")")) return null;
+        return callToBlock(name, args);
+      }
+      this.vars.add(name);
+      return { type: "variables_get", fields: { VAR: { id: name } } };
+    }
+    return null;
+  }
+}
 
+function callToBlock(name: string, args: BlockSpec[]): BlockSpec | null {
+  if (name === "len" && args.length === 1) {
+    return { type: "lists_length", inputs: { VALUE: { block: args[0] } } };
+  }
   return null;
 }
 
-/**
- * Statements that operate on a device variable. Requires that the port's kind
- * was inferred from a preceding isinstance guard.
- */
-function matchDeviceStatement(
-  line: string,
-  portKind: Map<string, DeviceKind>,
-): BlockSpec | null {
-  let m: RegExpExecArray | null;
+function parseExpr(src: string, vars: Set<string>): BlockSpec | null {
+  const toks = lexExpr(src.trim());
+  if (!toks) return null;
+  return new ExprParser(toks, vars).parse();
+}
 
+// ---------------------------------------------------------------------------
+// Statement-level: stateless top-level patterns (no dev_x involved)
+// ---------------------------------------------------------------------------
+
+function numInput(name: string, expr: string) {
+  return { [name]: { shadow: { type: "math_number", fields: { NUM: expr } } as BlockSpec } };
+}
+
+function matchStatement(line: string): BlockSpec | null {
+  let m: RegExpExecArray | null;
+  if ((m = /^hub\.ports\.LED\.setRgbColorIdx\(lpf2\.color\.([A-Z]+)\)$/.exec(line))) {
+    if (COLOR_NAMES.has(m[1])) return { type: "hub_led_color", fields: { COLOR: m[1] } };
+  }
+  if ((m = /^hub\.ports\.LED\.setRgbColor\(\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\)$/.exec(line))) {
+    return { type: "hub_led_rgb", inputs: { ...numInput("R", m[1]), ...numInput("G", m[2]), ...numInput("B", m[3]) } };
+  }
+  if (line === "hub.buttons.poll()") return { type: "hub_button_poll" };
+  if (line === "hub.imu.reset()") return { type: "hub_imu_reset" };
+  if (line === "hub.powerOff()") return { type: "hub_poweroff" };
+  if ((m = /^hub\.log\.setLevel\((\d)\)$/.exec(line))) {
+    if (LOG_LEVELS.has(m[1])) return { type: "hub_log_level", fields: { LEVEL: m[1] } };
+  }
+  if ((m = /^hub\.lcd\.(on|off)\(\)$/.exec(line))) {
+    return { type: "hub_lcd_backlight", fields: { STATE: m[1] } };
+  }
+  if ((m = /^hub\.lcd\.backlight\((-?\d+)\)$/.exec(line))) {
+    return { type: "hub_lcd_backlight_duty", inputs: numInput("DUTY", m[1]) };
+  }
+  if ((m = /^hub\.lcd\.fill\((-?\d+)\)$/.exec(line))) {
+    return { type: "hub_lcd_fill", inputs: numInput("COLOR", m[1]) };
+  }
+  return null;
+}
+
+function matchDeviceStatement(line: string, portKind: Map<string, DeviceKind>): BlockSpec | null {
+  let m: RegExpExecArray | null;
+  const kindOf = (portUpper: string) => portKind.get(portUpper.toLowerCase());
   const withPort = (re: RegExp): { port: string; groups: string[] } | null => {
     m = re.exec(line);
     if (!m) return null;
     return { port: m[1].toUpperCase(), groups: m.slice(1) };
   };
-
-  const kindOf = (portUpper: string) => portKind.get(portUpper.toLowerCase());
-
   let r;
-
-  // Motor family (device kind: motor)
   if ((r = withPort(/^dev_([a-d])\.startSpeed\((-?\d+)\)$/))) {
     if (kindOf(r.port) === "motor")
       return { type: "motor_start_speed", fields: { PORT: r.port }, inputs: numInput("SPEED", r.groups[1]) };
@@ -119,80 +392,38 @@ function matchDeviceStatement(
   }
   if ((r = withPort(/^dev_([a-d])\.startSpeedForTime\((-?\d+),\s*(-?\d+)\)$/))) {
     if (kindOf(r.port) === "motor")
-      return {
-        type: "motor_run_for_time",
-        fields: { PORT: r.port },
-        inputs: { ...numInput("MS", r.groups[1]), ...numInput("SPEED", r.groups[2]) },
-      };
+      return { type: "motor_run_for_time", fields: { PORT: r.port }, inputs: { ...numInput("MS", r.groups[1]), ...numInput("SPEED", r.groups[2]) } };
   }
   if ((r = withPort(/^dev_([a-d])\.startSpeedForDegrees\((-?\d+),\s*(-?\d+)\)$/))) {
     if (kindOf(r.port) === "motor")
-      return {
-        type: "motor_run_for_degrees",
-        fields: { PORT: r.port },
-        inputs: { ...numInput("DEG", r.groups[1]), ...numInput("SPEED", r.groups[2]) },
-      };
+      return { type: "motor_run_for_degrees", fields: { PORT: r.port }, inputs: { ...numInput("DEG", r.groups[1]), ...numInput("SPEED", r.groups[2]) } };
   }
   if ((r = withPort(/^dev_([a-d])\.gotoAbsPosition\((-?\d+),\s*(-?\d+)\)$/))) {
     if (kindOf(r.port) === "motor")
-      return {
-        type: "motor_goto_position",
-        fields: { PORT: r.port },
-        inputs: { ...numInput("DEG", r.groups[1]), ...numInput("SPEED", r.groups[2]) },
-      };
+      return { type: "motor_goto_position", fields: { PORT: r.port }, inputs: { ...numInput("DEG", r.groups[1]), ...numInput("SPEED", r.groups[2]) } };
   }
   if ((r = withPort(/^dev_([a-d])\.presetEncoder\(0\)$/))) {
-    if (kindOf(r.port) === "motor")
-      return { type: "motor_reset_encoder", fields: { PORT: r.port } };
+    if (kindOf(r.port) === "motor") return { type: "motor_reset_encoder", fields: { PORT: r.port } };
   }
   if ((r = withPort(/^dev_([a-d])\.setAccTime\((-?\d+),\s*(\d)\)$/))) {
     if (kindOf(r.port) === "motor" && ACCEL_PROFILES.has(r.groups[2]))
-      return {
-        type: "motor_set_acc_time",
-        fields: { PORT: r.port, PROFILE: r.groups[2] },
-        inputs: numInput("MS", r.groups[1]),
-      };
+      return { type: "motor_set_acc_time", fields: { PORT: r.port, PROFILE: r.groups[2] }, inputs: numInput("MS", r.groups[1]) };
   }
   if ((r = withPort(/^dev_([a-d])\.setDecTime\((-?\d+),\s*(\d)\)$/))) {
     if (kindOf(r.port) === "motor" && ACCEL_PROFILES.has(r.groups[2]))
-      return {
-        type: "motor_set_dec_time",
-        fields: { PORT: r.port, PROFILE: r.groups[2] },
-        inputs: numInput("MS", r.groups[1]),
-      };
+      return { type: "motor_set_dec_time", fields: { PORT: r.port, PROFILE: r.groups[2] }, inputs: numInput("MS", r.groups[1]) };
   }
-
-  // Sensor family: setLight statement blocks.
   if ((r = withPort(/^dev_([a-d])\.setLight\((-?\d+),\s*(-?\d+),\s*(-?\d+)\)$/))) {
     if (kindOf(r.port) === "color_sensor")
-      return {
-        type: "color_set_light",
-        fields: { PORT: r.port },
-        inputs: {
-          ...numInput("L1", r.groups[1]),
-          ...numInput("L2", r.groups[2]),
-          ...numInput("L3", r.groups[3]),
-        },
-      };
+      return { type: "color_set_light", fields: { PORT: r.port }, inputs: { ...numInput("L1", r.groups[1]), ...numInput("L2", r.groups[2]), ...numInput("L3", r.groups[3]) } };
   }
   if ((r = withPort(/^dev_([a-d])\.setLight\((-?\d+),\s*(-?\d+),\s*(-?\d+),\s*(-?\d+)\)$/))) {
     if (kindOf(r.port) === "distance_sensor")
-      return {
-        type: "distance_set_light",
-        fields: { PORT: r.port },
-        inputs: {
-          ...numInput("L1", r.groups[1]),
-          ...numInput("L2", r.groups[2]),
-          ...numInput("L3", r.groups[3]),
-          ...numInput("L4", r.groups[4]),
-        },
-      };
+      return { type: "distance_set_light", fields: { PORT: r.port }, inputs: { ...numInput("L1", r.groups[1]), ...numInput("L2", r.groups[2]), ...numInput("L3", r.groups[3]), ...numInput("L4", r.groups[4]) } };
   }
-
   return null;
 }
 
-/** Auto-generated preamble unrelated to any device variable. */
 function isPreambleBoilerplate(line: string): boolean {
   if (line === "") return true;
   if (/^import\s/.test(line)) return true;
@@ -202,44 +433,355 @@ function isPreambleBoilerplate(line: string): boolean {
   return false;
 }
 
-/** Chunk = one top-level line plus any indented lines that follow it. */
-interface Chunk {
-  lines: string[];
+// ---------------------------------------------------------------------------
+// Line parsing + statement grouping (indent-aware)
+// ---------------------------------------------------------------------------
+
+interface Line {
+  indent: number;
+  text: string;
+  raw: string;
 }
 
-function chunkify(source: string): Chunk[] {
-  const lines = source.replace(/\r\n?/g, "\n").split("\n");
-  const chunks: Chunk[] = [];
-  for (const rawLine of lines) {
-    const line = rawLine.replace(/\s+$/, "");
-    if (/^\s+/.test(line) && chunks.length) {
-      chunks[chunks.length - 1].lines.push(line);
-    } else {
-      chunks.push({ lines: [line] });
+interface Group {
+  header: Line;
+  bodyLines: Line[];   // raw indented body lines (may contain nested compound headers)
+}
+
+function parseLines(source: string): Line[] {
+  return source.replace(/\r\n?/g, "\n").split("\n").map((raw) => {
+    const m = /^([ \t]*)/.exec(raw)!;
+    const indent = m[1].replace(/\t/g, "    ").length;
+    return { indent, text: raw.replace(/^[ \t]+/, "").replace(/\s+$/, ""), raw };
+  });
+}
+
+/**
+ * Group a flat line list into top-level statements at `baseIndent`.
+ * Blank / comment lines are attached to the preceding group's body when
+ * inside a body, else discarded.
+ */
+function groupAt(lines: Line[], start: number, end: number, baseIndent: number): { groups: Group[] } {
+  const groups: Group[] = [];
+  let i = start;
+  while (i < end) {
+    const L = lines[i];
+    if (L.text === "" || L.text.startsWith("#")) { i++; continue; }
+    if (L.indent < baseIndent) break;
+    if (L.indent > baseIndent) { i++; continue; } // shouldn't happen at proper base
+    const g: Group = { header: L, bodyLines: [] };
+    let j = i + 1;
+    while (j < end) {
+      const N = lines[j];
+      if (N.text === "" || N.text.startsWith("#")) {
+        g.bodyLines.push(N);
+        j++;
+        continue;
+      }
+      if (N.indent > baseIndent) { g.bodyLines.push(N); j++; }
+      else break;
+    }
+    groups.push(g);
+    i = j;
+  }
+  return { groups };
+}
+
+// ---------------------------------------------------------------------------
+// Compound-statement translation
+// ---------------------------------------------------------------------------
+
+interface Ctx {
+  portKind: Map<string, DeviceKind>;
+  keepRaw: Set<string>;
+  vars: Set<string>;
+}
+
+function chunkText(g: Group): string {
+  return [g.header.raw, ...g.bodyLines.map((l) => l.raw)].join("\n").replace(/\s+$/, "");
+}
+
+function refsInGroup(g: Group): Set<string> {
+  const out = new Set<string>();
+  const re = /\bdev_([a-d])\b/g;
+  const scan = (s: string) => { let m; while ((m = re.exec(s))) out.add(m[1]); };
+  scan(g.header.text);
+  for (const l of g.bodyLines) scan(l.text);
+  return out;
+}
+
+/** Try to translate a group. Returns null if not translatable. */
+function translateGroup(g: Group, ctx: Ctx): BlockSpec | null {
+  const t = g.header.text;
+
+  // Simple hub statements (no dev_x).
+  if (g.bodyLines.every((l) => l.text === "" || l.text.startsWith("#"))) {
+    const block = matchStatement(t);
+    if (block) return block;
+  }
+
+  // Compound: while
+  if (t.startsWith("while ") && t.endsWith(":")) {
+    const cond = t.slice(6, -1).trim();
+    const condBlock = parseExpr(cond, ctx.vars);
+    if (!condBlock) return null;
+    const bodyChain = translateBody(g.bodyLines, ctx);
+    const inputs: BlockSpec["inputs"] = { BOOL: { block: condBlock } };
+    if (bodyChain) inputs.DO = { block: bodyChain };
+    return { type: "controls_whileUntil", fields: { MODE: "WHILE" }, inputs };
+  }
+
+  // Compound: for X in range(...)
+  if (t.startsWith("for ") && t.endsWith(":")) {
+    return translateFor(g, ctx);
+  }
+
+  // print(x)
+  const printMatch = /^print\((.*)\)$/.exec(t);
+  if (printMatch && g.bodyLines.every((l) => l.text === "" || l.text.startsWith("#"))) {
+    const arg = parseExpr(printMatch[1], ctx.vars);
+    if (arg) return { type: "text_print", inputs: { TEXT: { block: arg } } };
+  }
+
+  // Simple assignment: NAME = expr  (excluding == and multi-target).
+  if (g.bodyLines.every((l) => l.text === "" || l.text.startsWith("#"))) {
+    const asgn = /^([A-Za-z_]\w*)\s*=(?!=)\s*(.+)$/.exec(t);
+    if (asgn) {
+      const value = parseExpr(asgn[2], ctx.vars);
+      if (value) {
+        ctx.vars.add(asgn[1]);
+        return { type: "variables_set", fields: { VAR: { id: asgn[1] } }, inputs: { VALUE: { block: value } } };
+      }
     }
   }
-  return chunks;
+
+  return null;
 }
 
-/** Ports referenced by any `dev_<a-d>` identifier in the chunk. */
-function refsInChunk(chunk: Chunk): Set<string> {
-  const found = new Set<string>();
-  const re = /\bdev_([a-d])\b/g;
-  for (const l of chunk.lines) {
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(l))) found.add(m[1]);
+function translateFor(g: Group, ctx: Ctx): BlockSpec | null {
+  const t = g.header.text;
+  // for VAR in range(...)
+  const m = /^for\s+([A-Za-z_]\w*)\s+in\s+range\s*\((.*)\)\s*:$/.exec(t);
+  if (!m) return null;
+  const varName = m[1];
+  const argsSrc = m[2];
+  const parts = splitTopArgs(argsSrc);
+  if (!parts) return null;
+  const args = parts.map((s) => parseExpr(s, ctx.vars));
+  if (args.some((a) => a === null)) return null;
+  const bodyChain = translateBody(g.bodyLines, ctx);
+  if (parts.length === 1) {
+    // controls_repeat_ext(TIMES=range_arg, DO=body)
+    ctx.vars.add(varName);
+    const inputs: BlockSpec["inputs"] = { TIMES: { block: args[0]! } };
+    if (bodyChain) inputs.DO = { block: bodyChain };
+    return { type: "controls_repeat_ext", inputs };
   }
-  return found;
+  // 2 or 3 args → controls_for(VAR, FROM, TO, BY, DO); Blockly TO is inclusive,
+  // Python range end is exclusive → subtract 1.
+  const from = args[0]!;
+  const toExclusive = args[1]!;
+  const toInclusive: BlockSpec = {
+    type: "math_arithmetic",
+    fields: { OP: "MINUS" },
+    inputs: {
+      A: { block: toExclusive },
+      B: { block: { type: "math_number", fields: { NUM: "1" } } },
+    },
+  };
+  const by = args[2] ?? { type: "math_number", fields: { NUM: "1" } };
+  ctx.vars.add(varName);
+  const inputs: BlockSpec["inputs"] = {
+    FROM: { block: from },
+    TO: { block: toInclusive },
+    BY: { block: by },
+  };
+  if (bodyChain) inputs.DO = { block: bodyChain };
+  return {
+    type: "controls_for",
+    fields: { VAR: { id: varName } },
+    inputs,
+  };
 }
+
+function splitTopArgs(src: string): string[] | null {
+  const parts: string[] = [];
+  let depth = 0;
+  let inStr: string | null = null;
+  let start = 0;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (inStr) {
+      if (c === "\\") { i++; continue; }
+      if (c === inStr) inStr = null;
+      continue;
+    }
+    if (c === "'" || c === '"') { inStr = c; continue; }
+    if (c === "(" || c === "[") depth++;
+    else if (c === ")" || c === "]") depth--;
+    else if (c === "," && depth === 0) {
+      parts.push(src.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  if (depth !== 0 || inStr) return null;
+  const last = src.slice(start).trim();
+  if (last) parts.push(last);
+  return parts;
+}
+
+/** Translate an if/elif/else chain given the groups that span it. */
+function translateIfChain(groups: Group[], startIdx: number, ctx: Ctx): { block: BlockSpec | null; end: number } {
+  const branches: { cond: string | null; body: Line[] }[] = [];
+  const head = groups[startIdx];
+  branches.push({ cond: head.header.text.slice(3, -1).trim(), body: head.bodyLines });
+  let i = startIdx + 1;
+  while (i < groups.length) {
+    const next = groups[i];
+    if (next.header.text.startsWith("elif ") && next.header.text.endsWith(":")) {
+      branches.push({ cond: next.header.text.slice(5, -1).trim(), body: next.bodyLines });
+      i++;
+    } else if (next.header.text === "else:") {
+      branches.push({ cond: null, body: next.bodyLines });
+      i++;
+      break;
+    } else break;
+  }
+  const inputs: BlockSpec["inputs"] = {};
+  let ifIdx = 0;
+  let elseIfCount = 0;
+  let hasElse = false;
+  for (const b of branches) {
+    if (b.cond === null) {
+      hasElse = true;
+      const body = translateBody(b.body, ctx);
+      if (body) inputs.ELSE = { block: body };
+    } else {
+      const cond = parseExpr(b.cond, ctx.vars);
+      if (!cond) return { block: null, end: i };
+      inputs[`IF${ifIdx}`] = { block: cond };
+      const body = translateBody(b.body, ctx);
+      if (body) inputs[`DO${ifIdx}`] = { block: body };
+      if (ifIdx > 0) elseIfCount++;
+      ifIdx++;
+    }
+  }
+  const block: BlockSpec = { type: "controls_if", inputs };
+  if (elseIfCount > 0 || hasElse) {
+    block.extraState = { elseIfCount, hasElse };
+  }
+  return { block, end: i };
+}
+
+// ---------------------------------------------------------------------------
+// Body / group-list translation
+// ---------------------------------------------------------------------------
+
+function translateBody(bodyLines: Line[], ctx: Ctx): BlockSpec | undefined {
+  if (bodyLines.length === 0) return undefined;
+  // Body indent is the first non-blank line's indent.
+  const first = bodyLines.find((l) => l.text !== "" && !l.text.startsWith("#"));
+  if (!first) return undefined;
+  const baseIndent = first.indent;
+  const { groups } = groupAt(bodyLines, 0, bodyLines.length, baseIndent);
+  return chain(translateGroups(groups, ctx));
+}
+
+function translateGroups(groups: Group[], ctx: Ctx): BlockSpec[] {
+  const specs: BlockSpec[] = [];
+  const rawBuffer: string[] = [];
+  const flushRaw = () => {
+    if (!rawBuffer.length) return;
+    const trimmed = rawBuffer.join("\n").replace(/\s+$/, "");
+    if (trimmed) specs.push({ type: "raw_python", data: trimmed });
+    rawBuffer.length = 0;
+  };
+
+  let i = 0;
+  while (i < groups.length) {
+    const g = groups[i];
+    const t = g.header.text;
+
+    // Preamble boilerplate
+    if (isPreambleBoilerplate(t) && g.bodyLines.every((l) => l.text === "" || l.text.startsWith("#"))) {
+      i++;
+      continue;
+    }
+
+    // Device-referencing groups: participate in port-kind + keepRaw logic.
+    const refs = refsInGroup(g);
+    if (refs.size > 0) {
+      const cd = classifyDeviceGroup(g, ctx.portKind);
+      const keepRaw = [...refs].some((p) => ctx.keepRaw.has(p));
+      if (keepRaw) {
+        rawBuffer.push(chunkText(g));
+        i++;
+        continue;
+      }
+      if (cd.role === "translatable" && cd.block) {
+        flushRaw();
+        specs.push(cd.block);
+        i++;
+        continue;
+      }
+      if (cd.role === "setup1" || cd.role === "setup2" || cd.role === "setMode" || cd.role === "warn") {
+        i++;
+        continue;
+      }
+      // opaque device group but no keepRaw — shouldn't happen; safe fallback.
+      rawBuffer.push(chunkText(g));
+      i++;
+      continue;
+    }
+
+    // If chain
+    if (t.startsWith("if ") && t.endsWith(":")) {
+      const { block, end } = translateIfChain(groups, i, ctx);
+      if (block) {
+        flushRaw();
+        specs.push(block);
+        i = end;
+        continue;
+      }
+      // Fallback: emit the entire chain (if + elifs + else) as raw.
+      for (let k = i; k < end; k++) rawBuffer.push(chunkText(groups[k]));
+      i = end;
+      continue;
+    }
+
+    // Stray elif/else at top-level = malformed → raw.
+    if (t.startsWith("elif ") || t === "else:") {
+      rawBuffer.push(chunkText(g));
+      i++;
+      continue;
+    }
+
+    // Try to translate as a single group.
+    const block = translateGroup(g, ctx);
+    if (block) {
+      flushRaw();
+      specs.push(block);
+    } else {
+      rawBuffer.push(chunkText(g));
+    }
+    i++;
+  }
+  flushRaw();
+  return specs;
+}
+
+// ---------------------------------------------------------------------------
+// Device-group classification (used for boilerplate skipping / keepRaw)
+// ---------------------------------------------------------------------------
 
 type DeviceRole = "setup1" | "setup2" | "setMode" | "warn" | "translatable" | "opaque";
 
-function classifyDeviceChunk(
-  chunk: Chunk,
-  portKind: Map<string, DeviceKind>,
-): { role: DeviceRole; block?: BlockSpec; port?: string; kind?: DeviceKind } {
-  if (chunk.lines.length === 1) {
-    const line = chunk.lines[0];
+function classifyDeviceGroup(g: Group, portKind: Map<string, DeviceKind>): { role: DeviceRole; block?: BlockSpec; port?: string; kind?: DeviceKind } {
+  const bodyEmpty = g.bodyLines.every((l) => l.text === "" || l.text.startsWith("#"));
+
+  // Single-line: setup1 / setMode / warn / device statement.
+  if (bodyEmpty) {
+    const line = g.header.text;
     let m: RegExpExecArray | null;
     if ((m = /^dev_([a-d])\s*=\s*hub\.ports\.[A-D]\.device\(\)$/.exec(line))) {
       return { role: "setup1", port: m[1] };
@@ -259,47 +801,42 @@ function classifyDeviceChunk(
     }
     return { role: "opaque" };
   }
-  // Multi-line chunk: is it the isinstance guard?
-  const first = chunk.lines[0];
-  const second = chunk.lines[1] ?? "";
+
+  // Multi-line body: isinstance guard?
+  const first = g.header.text;
+  const second = g.bodyLines.find((l) => l.text !== "" && !l.text.startsWith("#"))?.text ?? "";
   const m = /^if not isinstance\(dev_([a-d]), devices\.(\w+)\):$/.exec(first);
-  if (m && /^\s+raise TypeError\(/.test(second)) {
+  if (m && /^raise TypeError\(/.test(second)) {
     const kind = m[2];
     if (DEVICE_KINDS.has(kind as DeviceKind)) {
-      // Guard chunk may only contain header + raise line; anything else means
-      // the user glued extra logic here — treat as opaque so we keep it.
-      const extra = chunk.lines.slice(2).some((l) => l.trim() !== "");
-      if (!extra) return { role: "setup2", port: m[1], kind: kind as DeviceKind };
+      // Body should only have the raise line and blanks/comments.
+      const nonTrivial = g.bodyLines.filter((l) => l.text !== "" && !l.text.startsWith("#"));
+      if (nonTrivial.length === 1) return { role: "setup2", port: m[1], kind: kind as DeviceKind };
     }
   }
   return { role: "opaque" };
 }
 
-function makeRaw(source: string): BlockSpec | null {
-  const trimmed = source.replace(/\s+$/, "");
-  if (!trimmed) return null;
-  return { type: "raw_python", data: trimmed };
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+export function hasRawBlock(chainSpec: BlockSpec | undefined): boolean {
+  const visit = (b: BlockSpec | undefined): boolean => {
+    if (!b) return false;
+    if (b.type === "raw_python") return true;
+    if (b.inputs) {
+      for (const key of Object.keys(b.inputs)) {
+        const sub = b.inputs[key].block;
+        if (sub && visit(sub)) return true;
+      }
+    }
+    if (b.next?.block && visit(b.next.block)) return true;
+    return false;
+  };
+  return visit(chainSpec);
 }
 
-function chain(specs: BlockSpec[]): BlockSpec | undefined {
-  if (specs.length === 0) return undefined;
-  for (let i = specs.length - 1; i > 0; i--) {
-    specs[i - 1].next = { block: specs[i] };
-  }
-  return specs[0];
-}
-
-export function hasRawBlock(chain: BlockSpec | undefined): boolean {
-  let cur: BlockSpec | undefined = chain;
-  while (cur) {
-    if (cur.type === "raw_python") return true;
-    cur = cur.next?.block;
-  }
-  return false;
-}
-
-/** Normalize Python source for round-trip equivalence: strip trailing spaces,
- *  collapse runs of blank lines, and drop leading/trailing whitespace. */
 export function normalizePython(src: string): string {
   return src
     .replace(/\r\n?/g, "\n")
@@ -310,76 +847,55 @@ export function normalizePython(src: string): string {
     .trim();
 }
 
-export function pythonToBlocks(source: string): BlockSpec | undefined {
-  const chunks = chunkify(source);
+function chain(specs: BlockSpec[]): BlockSpec | undefined {
+  if (specs.length === 0) return undefined;
+  for (let i = specs.length - 1; i > 0; i--) {
+    specs[i - 1].next = { block: specs[i] };
+  }
+  return specs[0];
+}
 
-  // Pass 1: infer port → device kind from isinstance guards.
-  const portKind = new Map<string, DeviceKind>();
-  for (const c of chunks) {
-    const info = classifyDeviceChunk(c, portKind);
-    if (info.role === "setup2" && info.port && info.kind) {
-      portKind.set(info.port, info.kind);
+// ---------------------------------------------------------------------------
+// Main entry
+// ---------------------------------------------------------------------------
+
+export function pythonToBlocks(source: string): Translation {
+  const lines = parseLines(source);
+  const ctx: Ctx = {
+    portKind: new Map(),
+    keepRaw: new Set(),
+    vars: new Set(),
+  };
+
+  // Group at outer indent (0).
+  const { groups } = groupAt(lines, 0, lines.length, 0);
+
+  // Pass 1: scan all groups (any depth) for setup2 to infer port kinds.
+  const walkGroups = (gs: Group[], visit: (g: Group) => void) => {
+    for (const g of gs) {
+      visit(g);
+      const inner = parseLines(g.bodyLines.map((l) => l.raw).join("\n"));
+      const base = inner.find((l) => l.text !== "")?.indent ?? 0;
+      const { groups: sub } = groupAt(inner, 0, inner.length, base);
+      if (sub.length) walkGroups(sub, visit);
     }
-  }
+  };
+  walkGroups(groups, (g) => {
+    const cd = classifyDeviceGroup(g, ctx.portKind);
+    if (cd.role === "setup2" && cd.port && cd.kind) ctx.portKind.set(cd.port, cd.kind);
+  });
 
-  // Pass 2: any opaque chunk that touches dev_x forces port x to keep raw.
-  const keepRaw = new Set<string>();
-  for (const c of chunks) {
-    const refs = refsInChunk(c);
-    if (refs.size === 0) continue;
-    const info = classifyDeviceChunk(c, portKind);
-    if (info.role === "opaque") for (const p of refs) keepRaw.add(p);
-  }
+  // Pass 2: mark keepRaw ports.
+  walkGroups(groups, (g) => {
+    const refs = refsInGroup(g);
+    if (refs.size === 0) return;
+    const cd = classifyDeviceGroup(g, ctx.portKind);
+    if (cd.role === "opaque") for (const p of refs) ctx.keepRaw.add(p);
+  });
 
   // Pass 3: emit.
-  const specs: BlockSpec[] = [];
-  let rawBuffer: string[] = [];
-  const flushRaw = () => {
-    if (!rawBuffer.length) return;
-    const raw = makeRaw(rawBuffer.join("\n"));
-    if (raw) specs.push(raw);
-    rawBuffer = [];
-  };
-  const emitRawChunk = (c: Chunk) => {
-    for (const l of c.lines) rawBuffer.push(l);
-  };
-
-  for (const c of chunks) {
-    const refs = refsInChunk(c);
-    if (refs.size === 0) {
-      if (c.lines.length === 1) {
-        const line = c.lines[0];
-        if (isPreambleBoilerplate(line)) continue;
-        const block = matchStatement(line);
-        if (block) {
-          flushRaw();
-          specs.push(block);
-        } else {
-          rawBuffer.push(line);
-        }
-      } else {
-        emitRawChunk(c);
-      }
-      continue;
-    }
-
-    // Chunk references at least one dev_x.
-    const anyKeepRaw = [...refs].some((p) => keepRaw.has(p));
-    if (anyKeepRaw) {
-      emitRawChunk(c);
-      continue;
-    }
-
-    // All referenced ports are cleanly translatable — drop boilerplate,
-    // emit a block for translatable statements.
-    const info = classifyDeviceChunk(c, portKind);
-    if (info.role === "translatable" && info.block) {
-      flushRaw();
-      specs.push(info.block);
-    }
-    // setup1 / setup2 / setMode / warn silently dropped — regenerator re-emits.
-  }
-  flushRaw();
-
-  return chain(specs);
+  const specs = translateGroups(groups, ctx);
+  const chainResult = chain(specs);
+  const variables = [...ctx.vars].map((name) => ({ name, id: name }));
+  return { chain: chainResult, variables };
 }

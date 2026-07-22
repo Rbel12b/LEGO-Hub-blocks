@@ -4,6 +4,10 @@ import { registerAllBlocks } from "../src/blocks";
 import { workspaceToPython } from "../src/codegen/pythonGen";
 import { pythonToBlocks, type BlockSpec } from "../src/project/pythonToBlocks";
 
+function translate(source: string): BlockSpec | undefined {
+  return pythonToBlocks(source).chain;
+}
+
 beforeEach(() => registerAllBlocks());
 
 function underHat(chain: BlockSpec | undefined): object {
@@ -35,7 +39,7 @@ function chainTypes(spec: BlockSpec | undefined): string[] {
 function roundTrip(chain: BlockSpec): { first: string; second: string } {
   const ws1 = makeWorkspace(underHat(chain));
   const first = workspaceToPython(ws1);
-  const converted = pythonToBlocks(first);
+  const converted = translate(first);
   const ws2 = makeWorkspace(underHat(converted));
   const second = workspaceToPython(ws2);
   return { first, second };
@@ -43,25 +47,25 @@ function roundTrip(chain: BlockSpec): { first: string; second: string } {
 
 describe("pythonToBlocks", () => {
   it("returns undefined for empty source", () => {
-    expect(pythonToBlocks("")).toBeUndefined();
-    expect(pythonToBlocks("\n\n\n")).toBeUndefined();
+    expect(translate("")).toBeUndefined();
+    expect(translate("\n\n\n")).toBeUndefined();
   });
 
   it("skips import preamble", () => {
-    const chain = pythonToBlocks("import hub, lpf2\nfrom lpf2 import devices\n");
+    const chain = translate("import hub, lpf2\nfrom lpf2 import devices\n");
     expect(chain).toBeUndefined();
   });
 
   it("recognizes hub_led_color", () => {
     const src = "import hub, lpf2\n\nhub.ports.LED.setRgbColorIdx(lpf2.color.RED)\n";
-    const chain = pythonToBlocks(src);
+    const chain = translate(src);
     expect(chain?.type).toBe("hub_led_color");
     expect(chain?.fields?.COLOR).toBe("RED");
   });
 
   it("recognizes hub_led_rgb with numeric literals", () => {
     const src = "hub.ports.LED.setRgbColor(10, 20, 30)\n";
-    const chain = pythonToBlocks(src);
+    const chain = translate(src);
     expect(chain?.type).toBe("hub_led_rgb");
     expect(chain?.inputs?.R.shadow?.fields?.NUM).toBe("10");
     expect(chain?.inputs?.G.shadow?.fields?.NUM).toBe("20");
@@ -70,32 +74,25 @@ describe("pythonToBlocks", () => {
 
   it("recognizes bare hub statement blocks", () => {
     const src = "hub.buttons.poll()\nhub.imu.reset()\nhub.powerOff()\n";
-    expect(chainTypes(pythonToBlocks(src))).toEqual(["hub_button_poll", "hub_imu_reset", "hub_poweroff"]);
+    expect(chainTypes(translate(src))).toEqual(["hub_button_poll", "hub_imu_reset", "hub_poweroff"]);
   });
 
   it("wraps unknown code in a raw_python block", () => {
-    const src = "some_var = compute()\nprint('hi')\n";
-    const chain = pythonToBlocks(src);
+    const src = "some_var = compute(other_var)\n";
+    const chain = translate(src);
     expect(chain?.type).toBe("raw_python");
-    expect(chain?.data).toBe("some_var = compute()\nprint('hi')");
+    expect(chain?.data).toBe("some_var = compute(other_var)");
   });
 
   it("intersperses raw blocks between recognized ones", () => {
     const src = [
       "hub.buttons.poll()",
-      "print('mid')",
+      "weird_call_no_known_form(1, 2, 3)",
       "hub.imu.reset()",
       "",
     ].join("\n");
-    const types = chainTypes(pythonToBlocks(src));
+    const types = chainTypes(translate(src));
     expect(types).toEqual(["hub_button_poll", "raw_python", "hub_imu_reset"]);
-  });
-
-  it("preserves indented control-flow verbatim in raw block", () => {
-    const src = "for i in range(3):\n    print(i)\n";
-    const chain = pythonToBlocks(src);
-    expect(chain?.type).toBe("raw_python");
-    expect(chain?.data).toBe("for i in range(3):\n    print(i)");
   });
 
   it("recognizes motor block after typed-device setup", () => {
@@ -108,7 +105,7 @@ describe("pythonToBlocks", () => {
       "dev_a.startPower(50)",
       "",
     ].join("\n");
-    const chain = pythonToBlocks(src);
+    const chain = translate(src);
     expect(chain?.type).toBe("motor_start_power");
     expect(chain?.fields?.PORT).toBe("A");
     expect(chain?.inputs?.POWER.shadow?.fields?.NUM).toBe("50");
@@ -121,7 +118,7 @@ describe("pythonToBlocks", () => {
       '    raise TypeError("Port B: expected motor")',
       "dev_b.startPower(0)",
     ].join("\n");
-    const chain = pythonToBlocks(src);
+    const chain = translate(src);
     expect(chain?.type).toBe("motor_stop");
     expect(chain?.fields?.PORT).toBe("B");
   });
@@ -133,7 +130,7 @@ describe("pythonToBlocks", () => {
       '    raise TypeError("Port C: expected basic_motor")',
       "dev_c.startPower(75)",
     ].join("\n");
-    const chain = pythonToBlocks(src);
+    const chain = translate(src);
     expect(chain?.type).toBe("basic_motor_power");
     expect(chain?.fields?.PORT).toBe("C");
     expect(chain?.inputs?.POWER.shadow?.fields?.NUM).toBe("75");
@@ -146,7 +143,7 @@ describe("pythonToBlocks", () => {
       '    raise TypeError("Port D: expected color_sensor")',
       "dev_d.setLight(10, 20, 30)",
     ].join("\n");
-    const chain = pythonToBlocks(src);
+    const chain = translate(src);
     expect(chain?.type).toBe("color_set_light");
     expect(chain?.fields?.PORT).toBe("D");
     expect(chain?.inputs?.L2.shadow?.fields?.NUM).toBe("20");
@@ -159,7 +156,7 @@ describe("pythonToBlocks", () => {
       '    raise TypeError("Port A: expected distance_sensor")',
       "dev_a.setLight(10, 20, 30, 40)",
     ].join("\n");
-    const chain = pythonToBlocks(src);
+    const chain = translate(src);
     expect(chain?.type).toBe("distance_set_light");
     expect(chain?.inputs?.L4.shadow?.fields?.NUM).toBe("40");
   });
@@ -173,7 +170,7 @@ describe("pythonToBlocks", () => {
       "print(dev_a.getColorIdx())",
       "dev_a.setLight(1, 2, 3)",
     ].join("\n");
-    const chain = pythonToBlocks(src);
+    const chain = translate(src);
     // Whole thing collapses into a single raw_python block (all-or-nothing).
     expect(chain?.type).toBe("raw_python");
     expect(chain?.data).toContain("dev_a = hub.ports.A.device()");
@@ -194,7 +191,7 @@ describe("pythonToBlocks", () => {
       '    raise TypeError("Port B: expected motor")',
       "dev_b.startSpeed(60)",
     ].join("\n");
-    const types = chainTypes(pythonToBlocks(src));
+    const types = chainTypes(translate(src));
     expect(types).toContain("raw_python");
     expect(types).toContain("motor_start_speed");
   });
@@ -206,7 +203,7 @@ describe("pythonToBlocks", () => {
       '    raise TypeError("Port A: expected motor")',
       "dev_a.setAccTime(500, 1)",
     ].join("\n");
-    const chain = pythonToBlocks(src);
+    const chain = translate(src);
     expect(chain?.type).toBe("motor_set_acc_time");
     expect(chain?.fields?.PROFILE).toBe("1");
     expect(chain?.inputs?.MS.shadow?.fields?.NUM).toBe("500");
@@ -214,8 +211,148 @@ describe("pythonToBlocks", () => {
 
   it("recognizes hub_log_level and hub_lcd_backlight", () => {
     const src = "hub.log.setLevel(2)\nhub.lcd.on()\n";
-    const types = chainTypes(pythonToBlocks(src));
+    const types = chainTypes(translate(src));
     expect(types).toEqual(["hub_log_level", "hub_lcd_backlight"]);
+  });
+
+  it("translates simple assignment to variables_set", () => {
+    const src = "x = 42\n";
+    const chain = translate(src);
+    expect(chain?.type).toBe("variables_set");
+    const varField = chain?.fields?.VAR as { id: string };
+    expect(varField.id).toBe("x");
+    expect(chain?.inputs?.VALUE.block?.type).toBe("math_number");
+  });
+
+  it("translates print(...) to text_print", () => {
+    const src = 'print("hi")\n';
+    const chain = translate(src);
+    expect(chain?.type).toBe("text_print");
+    expect(chain?.inputs?.TEXT.block?.type).toBe("text");
+    expect(chain?.inputs?.TEXT.block?.fields?.TEXT).toBe("hi");
+  });
+
+  it("translates arithmetic expressions with precedence", () => {
+    const src = "x = 1 + 2 * 3\n";
+    const chain = translate(src);
+    const add = chain?.inputs?.VALUE.block;
+    expect(add?.type).toBe("math_arithmetic");
+    expect(add?.fields?.OP).toBe("ADD");
+    expect(add?.inputs?.A.block?.type).toBe("math_number");
+    const mul = add?.inputs?.B.block;
+    expect(mul?.type).toBe("math_arithmetic");
+    expect(mul?.fields?.OP).toBe("MULTIPLY");
+  });
+
+  it("translates comparison + boolean ops", () => {
+    const src = "x = a > 0 and b < 10\n";
+    const chain = translate(src);
+    const val = chain?.inputs?.VALUE.block;
+    expect(val?.type).toBe("logic_operation");
+    expect(val?.fields?.OP).toBe("AND");
+    expect(val?.inputs?.A.block?.type).toBe("logic_compare");
+    expect(val?.inputs?.A.block?.fields?.OP).toBe("GT");
+    expect(val?.inputs?.B.block?.fields?.OP).toBe("LT");
+  });
+
+  it("translates not / logic_negate", () => {
+    const src = "x = not True\n";
+    const chain = translate(src);
+    const val = chain?.inputs?.VALUE.block;
+    expect(val?.type).toBe("logic_negate");
+    expect(val?.inputs?.BOOL.block?.type).toBe("logic_boolean");
+    expect(val?.inputs?.BOOL.block?.fields?.BOOL).toBe("TRUE");
+  });
+
+  it("translates modulo and power", () => {
+    const src = "x = a % b\ny = a ** 2\n";
+    const chain = translate(src);
+    expect(chain?.inputs?.VALUE.block?.type).toBe("math_modulo");
+    const next = chain?.next?.block;
+    const pow = next?.inputs?.VALUE.block;
+    expect(pow?.type).toBe("math_arithmetic");
+    expect(pow?.fields?.OP).toBe("POWER");
+  });
+
+  it("translates list literal", () => {
+    const src = "x = [1, 2, 3]\n";
+    const chain = translate(src);
+    const list = chain?.inputs?.VALUE.block;
+    expect(list?.type).toBe("lists_create_with");
+    expect((list?.extraState as { itemCount: number }).itemCount).toBe(3);
+    expect(list?.inputs?.ADD0.block?.fields?.NUM).toBe("1");
+    expect(list?.inputs?.ADD2.block?.fields?.NUM).toBe("3");
+  });
+
+  it("translates len() to lists_length", () => {
+    const src = "n = len(items)\n";
+    const chain = translate(src);
+    expect(chain?.inputs?.VALUE.block?.type).toBe("lists_length");
+  });
+
+  it("translates unary minus via math_single NEG", () => {
+    const src = "x = -a\n";
+    const chain = translate(src);
+    const val = chain?.inputs?.VALUE.block;
+    expect(val?.type).toBe("math_single");
+    expect(val?.fields?.OP).toBe("NEG");
+  });
+
+  it("translates if/elif/else with extraState", () => {
+    const src = [
+      "if x > 0:",
+      "    y = 1",
+      "elif x < 0:",
+      "    y = -1",
+      "else:",
+      "    y = 0",
+    ].join("\n");
+    const chain = translate(src);
+    expect(chain?.type).toBe("controls_if");
+    const es = chain?.extraState as { elseIfCount: number; hasElse: boolean };
+    expect(es.elseIfCount).toBe(1);
+    expect(es.hasElse).toBe(true);
+    expect(chain?.inputs?.IF0.block?.type).toBe("logic_compare");
+    expect(chain?.inputs?.DO0.block?.type).toBe("variables_set");
+    expect(chain?.inputs?.IF1.block?.fields?.OP).toBe("LT");
+    expect(chain?.inputs?.ELSE.block?.type).toBe("variables_set");
+  });
+
+  it("translates while loop", () => {
+    const src = "while x < 10:\n    x = x + 1\n";
+    const chain = translate(src);
+    expect(chain?.type).toBe("controls_whileUntil");
+    expect(chain?.fields?.MODE).toBe("WHILE");
+    expect(chain?.inputs?.BOOL.block?.type).toBe("logic_compare");
+    expect(chain?.inputs?.DO.block?.type).toBe("variables_set");
+  });
+
+  it("translates for range(N) to controls_repeat_ext", () => {
+    const src = "for i in range(5):\n    print(i)\n";
+    const chain = translate(src);
+    expect(chain?.type).toBe("controls_repeat_ext");
+    expect(chain?.inputs?.TIMES.block?.fields?.NUM).toBe("5");
+    expect(chain?.inputs?.DO.block?.type).toBe("text_print");
+  });
+
+  it("translates for range(A, B) to controls_for with inclusive TO", () => {
+    const src = "for i in range(1, 10):\n    print(i)\n";
+    const chain = translate(src);
+    expect(chain?.type).toBe("controls_for");
+    expect(chain?.inputs?.FROM.block?.fields?.NUM).toBe("1");
+    // TO becomes 10 - 1 arithmetic
+    const to = chain?.inputs?.TO.block;
+    expect(to?.type).toBe("math_arithmetic");
+    expect(to?.fields?.OP).toBe("MINUS");
+    expect(to?.inputs?.A.block?.fields?.NUM).toBe("10");
+    expect(to?.inputs?.B.block?.fields?.NUM).toBe("1");
+  });
+
+  it("declares variables encountered in the source", () => {
+    const src = "x = 5\ny = x + 1\n";
+    const result = pythonToBlocks(src);
+    const varNames = result.variables.map((v) => v.name).sort();
+    expect(varNames).toEqual(["x", "y"]);
   });
 });
 

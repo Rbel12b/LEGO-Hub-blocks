@@ -13,19 +13,17 @@ interface Props {
 
 function blocksProjectFromPython(source: string, title: string, settings: BlocksProject["settings"]): BlocksProject {
   const base = newBlocksProject(title);
-  const chain = pythonToBlocks(source);
+  const { chain, variables } = pythonToBlocks(source);
   const hat: Record<string, unknown> = { type: "on_program_start", x: 40, y: 40 };
   if (chain) hat.next = { block: chain };
-  return {
-    ...base,
-    settings,
-    workspace: {
-      blocks: {
-        languageVersion: 0,
-        blocks: [hat],
-      },
+  const workspace: Record<string, unknown> = {
+    blocks: {
+      languageVersion: 0,
+      blocks: [hat],
     },
   };
+  if (variables.length) workspace.variables = variables;
+  return { ...base, settings, workspace };
 }
 
 interface TranslationCheck {
@@ -37,7 +35,7 @@ interface TranslationCheck {
 
 function checkTranslation(source: string, title: string, settings: BlocksProject["settings"]): TranslationCheck {
   const project = blocksProjectFromPython(source, title, settings);
-  const chain = pythonToBlocks(source);
+  const { chain } = pythonToBlocks(source);
   const hasRaw = hasRawBlock(chain);
   const ws = new Blockly.Workspace();
   try {
