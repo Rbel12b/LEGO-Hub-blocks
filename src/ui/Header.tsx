@@ -3,6 +3,7 @@ import { useApp } from "../state/store";
 import { downloadProject, pickFile } from "../project/download";
 import type { AnyProject, BlocksProject } from "../project/format";
 import { newBlocksProject, newPythonProject } from "../project/format";
+import { pythonToBlocks } from "../project/pythonToBlocks";
 
 interface Props {
   onOpenSettings: () => void;
@@ -10,20 +11,16 @@ interface Props {
 
 function blocksProjectFromPython(source: string, title: string, settings: BlocksProject["settings"]): BlocksProject {
   const base = newBlocksProject(title);
+  const chain = pythonToBlocks(source);
+  const hat: Record<string, unknown> = { type: "on_program_start", x: 40, y: 40 };
+  if (chain) hat.next = { block: chain };
   return {
     ...base,
     settings,
     workspace: {
       blocks: {
         languageVersion: 0,
-        blocks: [
-          {
-            type: "on_program_start",
-            x: 40,
-            y: 40,
-            next: { block: { type: "raw_python", data: source } },
-          },
-        ],
+        blocks: [hat],
       },
     },
   };

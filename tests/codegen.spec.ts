@@ -49,7 +49,7 @@ describe("workspaceToPython", () => {
     expect(py).not.toContain("hub.ports.A.startPower");
   });
 
-  it("emits direct-port motor call under hat", () => {
+  it("emits typed-device motor call under hat", () => {
     const ws = makeWorkspace(
       underHat({
         type: "motor_start_power",
@@ -59,8 +59,10 @@ describe("workspaceToPython", () => {
     );
     const py = workspaceToPython(ws);
     expect(py).toContain("import hub, lpf2");
-    expect(py).toContain("hub.ports.A.startPower(50)");
-    expect(py).not.toContain("dev_a");
+    expect(py).toContain("from lpf2 import devices");
+    expect(py).toContain("dev_a = hub.ports.A.device()");
+    expect(py).toContain("isinstance(dev_a, devices.motor)");
+    expect(py).toContain("dev_a.startPower(50)");
   });
 
   it("emits typed-device setup + isinstance guard for color sensor", () => {
