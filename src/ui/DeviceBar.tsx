@@ -6,9 +6,11 @@ import { DeviceClient } from "../device/deviceClient";
 import { useApp } from "../state/store";
 import { sanitizeFilename } from "../utils/sanitize";
 import { saveLastDeviceName } from "../project/storage";
+import { newPythonProject } from "../project/format";
 
 export function DeviceBar() {
   const { device, connection, connectionError, setDevice, setConnection, appendConsole, project, pythonPreview } = useApp();
+  const loadProject = useApp((s) => s.loadProject);
   const [busy, setBusy] = useState(false);
   const dark = project.type === "python";
 
@@ -79,6 +81,28 @@ export function DeviceBar() {
       appendConsole("info", "[stop]\n");
     } catch (e) {
       appendConsole("err", `[stop failed: ${(e as Error).message}]\n`);
+    }
+  };
+
+  const loadFromDevice = async () => {
+    if (!device) return;
+    const path = window.prompt("Device file path:", "/sd/main.py");
+    if (!path) return;
+    setBusy(true);
+    appendConsole("info", `[load ← ${path}]\n`);
+    try {
+      const source = await device.readFile(path);
+      const title = path.split("/").pop()?.replace(/\.py$/, "") || "Untitled";
+      loadProject({
+        ...newPythonProject(title),
+        source,
+        settings: project.settings,
+      });
+      appendConsole("info", `[load OK: ${path} (${source.length}B)]\n`);
+    } catch (e) {
+      appendConsole("err", `[load failed: ${(e as Error).message}]\n`);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -172,6 +196,7 @@ export function DeviceBar() {
           <button type="button" style={successBtn} disabled={busy} onClick={run}>Run</button>
           <button type="button" style={dangerBtn} disabled={busy} onClick={stop}>Stop</button>
           <button type="button" style={primaryBtn} disabled={busy} onClick={upload}>Upload</button>
+          <button type="button" style={btnStyle} disabled={busy} onClick={loadFromDevice} title="Read a .py file from the device">Load</button>
         </>
       )}
       <span

@@ -9,16 +9,28 @@ import { loadAutosave, saveAutosave } from "./project/storage";
 export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const project = useApp((s) => s.project);
-  const setProject = useApp((s) => s.setProject);
+  const loadProject = useApp((s) => s.loadProject);
 
   useEffect(() => {
     const saved = loadAutosave();
-    if (saved) setProject(saved);
-  }, [setProject]);
+    if (saved) loadProject(saved);
+  }, [loadProject]);
 
   useEffect(() => {
     const id = setInterval(() => saveAutosave(useApp.getState().project), 5000);
     return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      const s = useApp.getState();
+      if (JSON.stringify(s.project) !== s.savedSnapshot) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
   }, []);
 
   return (

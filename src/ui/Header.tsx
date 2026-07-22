@@ -1,9 +1,11 @@
 import { useState } from "react";
+import * as Blockly from "blockly/core";
 import { useApp } from "../state/store";
 import { downloadProject, pickFile } from "../project/download";
 import type { AnyProject, BlocksProject } from "../project/format";
 import { newBlocksProject, newPythonProject } from "../project/format";
-import { pythonToBlocks } from "../project/pythonToBlocks";
+import { hasRawBlock, normalizePython, pythonToBlocks } from "../project/pythonToBlocks";
+import { workspaceToPython } from "../codegen/pythonGen";
 
 interface Props {
   onOpenSettings: () => void;
@@ -26,9 +28,38 @@ function blocksProjectFromPython(source: string, title: string, settings: Blocks
   };
 }
 
+interface TranslationCheck {
+  hasRaw: boolean;
+  roundTripOk: boolean;
+  regen: string;
+  project: BlocksProject;
+}
+
+function checkTranslation(source: string, title: string, settings: BlocksProject["settings"]): TranslationCheck {
+  const project = blocksProjectFromPython(source, title, settings);
+  const chain = pythonToBlocks(source);
+  const hasRaw = hasRawBlock(chain);
+  const ws = new Blockly.Workspace();
+  try {
+    Blockly.serialization.workspaces.load(project.workspace as object, ws);
+    const regen = workspaceToPython(ws);
+    const roundTripOk = normalizePython(regen) === normalizePython(source);
+    return { hasRaw, roundTripOk, regen, project };
+  } finally {
+    ws.dispose();
+  }
+}
+
+interface PromptState {
+  hasRaw: boolean;
+  roundTripOk: boolean;
+}
+
 export function Header({ onOpenSettings }: Props) {
   const { project, setProject } = useApp();
-  const [switchPrompt, setSwitchPrompt] = useState(false);
+  const loadProject = useApp((s) => s.loadProject);
+  const markSaved = useApp((s) => s.markSaved);
+  const [switchPrompt, setSwitchPrompt] = useState<PromptState | null>(null);
   const dark = project.type === "python";
 
   const rename = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -39,19 +70,25 @@ export function Header({ onOpenSettings }: Props) {
     if (project.type === "blocks") {
       const source = useApp.getState().pythonPreview || "";
       setProject({ ...newPythonProject(project.title), settings: project.settings, source });
-    } else {
-      setSwitchPrompt(true);
+      return;
     }
+    const check = checkTranslation(project.source, project.title, project.settings);
+    if (!check.hasRaw && check.roundTripOk) {
+      // Clean translation — skip prompt.
+      setProject(check.project);
+      return;
+    }
+    setSwitchPrompt({ hasRaw: check.hasRaw, roundTripOk: check.roundTripOk });
   };
 
   const confirmSwitch = (mode: "best-effort" | "discard") => {
-    if (project.type !== "python") return setSwitchPrompt(false);
+    if (project.type !== "python") return setSwitchPrompt(null);
     if (mode === "best-effort") {
       setProject(blocksProjectFromPython(project.source, project.title, project.settings));
     } else {
       setProject({ ...newBlocksProject(project.title), settings: project.settings });
     }
-    setSwitchPrompt(false);
+    setSwitchPrompt(null);
   };
 
   const openFile = async () => {
@@ -59,18 +96,23 @@ export function Header({ onOpenSettings }: Props) {
     if (!file) return;
     const text = await file.text();
     if (file.name.endsWith(".py")) {
-      setProject({
+      loadProject({
         ...newPythonProject(file.name.replace(/\.py$/, "")),
         source: text,
       });
     } else {
       try {
         const p = JSON.parse(text) as AnyProject;
-        setProject(p);
+        loadProject(p);
       } catch (e) {
         alert("Invalid project file: " + (e as Error).message);
       }
     }
+  };
+
+  const saveFile = () => {
+    downloadProject(project);
+    markSaved();
   };
 
   const toggleAdvanced = () => {
@@ -129,12 +171,13 @@ export function Header({ onOpenSettings }: Props) {
         </button>
       )}
       <button type="button" onClick={openFile} style={btnStyle}>Open</button>
-      <button type="button" onClick={() => downloadProject(project)} style={btnStyle}>Save</button>
+      <button type="button" onClick={saveFile} style={btnStyle}>Save</button>
       <button type="button" onClick={onOpenSettings} style={{ ...btnStyle, marginLeft: "auto" }}>Settings</button>
       {switchPrompt && (
         <SwitchToBlocksPrompt
           dark={dark}
-          onCancel={() => setSwitchPrompt(false)}
+          state={switchPrompt}
+          onCancel={() => setSwitchPrompt(null)}
           onDiscard={() => confirmSwitch("discard")}
           onBestEffort={() => confirmSwitch("best-effort")}
         />
@@ -145,12 +188,13 @@ export function Header({ onOpenSettings }: Props) {
 
 interface PromptProps {
   dark: boolean;
+  state: PromptState;
   onCancel: () => void;
   onDiscard: () => void;
   onBestEffort: () => void;
 }
 
-function SwitchToBlocksPrompt({ dark, onCancel, onDiscard, onBestEffort }: PromptProps) {
+function SwitchToBlocksPrompt({ dark, state, onCancel, onDiscard, onBestEffort }: PromptProps) {
   const overlay: React.CSSProperties = {
     position: "fixed",
     inset: 0,
@@ -176,15 +220,37 @@ function SwitchToBlocksPrompt({ dark, onCancel, onDiscard, onBestEffort }: Promp
     cursor: "pointer",
     border: "1px solid #155e75",
   };
+  const warnBg = dark ? "#3f1d1d" : "#fef2f2";
+  const warnBorder = dark ? "#7f1d1d" : "#fecaca";
+  const warnColor = dark ? "#fecaca" : "#7f1d1d";
   return (
     <div style={overlay} onClick={onCancel}>
       <div style={modal} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginTop: 0 }}>Switch to Blocks?</h3>
         <p style={{ fontSize: 14, lineHeight: 1.4 }}>
-          Python source can't be translated back into blocks. Choose how to proceed:
+          Full translation isn't possible for this Python source:
         </p>
         <ul style={{ fontSize: 13, lineHeight: 1.5, paddingLeft: 18 }}>
-          <li><strong>Best effort</strong> — keep the code inside a single "raw Python" block.</li>
+          {state.hasRaw && (
+            <li>Some code doesn't map to any block — it will stay inside "raw Python" blocks.</li>
+          )}
+          {!state.roundTripOk && (
+            <li style={{
+              background: warnBg,
+              border: `1px solid ${warnBorder}`,
+              color: warnColor,
+              padding: "4px 8px",
+              borderRadius: 4,
+              listStyle: "none",
+              marginLeft: -18,
+            }}>
+              <strong>Round-trip check failed:</strong> regenerating Python from the imported blocks does not reproduce the original source exactly. Behavior may drift.
+            </li>
+          )}
+        </ul>
+        <p style={{ fontSize: 13, lineHeight: 1.5 }}>Choose how to proceed:</p>
+        <ul style={{ fontSize: 13, lineHeight: 1.5, paddingLeft: 18 }}>
+          <li><strong>Best effort</strong> — keep whatever translated + raw Python for the rest.</li>
           <li><strong>Discard</strong> — start with an empty blocks workspace.</li>
           <li><strong>Cancel</strong> — stay in Python mode.</li>
         </ul>

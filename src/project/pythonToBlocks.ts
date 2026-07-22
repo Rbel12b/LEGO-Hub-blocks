@@ -289,6 +289,27 @@ function chain(specs: BlockSpec[]): BlockSpec | undefined {
   return specs[0];
 }
 
+export function hasRawBlock(chain: BlockSpec | undefined): boolean {
+  let cur: BlockSpec | undefined = chain;
+  while (cur) {
+    if (cur.type === "raw_python") return true;
+    cur = cur.next?.block;
+  }
+  return false;
+}
+
+/** Normalize Python source for round-trip equivalence: strip trailing spaces,
+ *  collapse runs of blank lines, and drop leading/trailing whitespace. */
+export function normalizePython(src: string): string {
+  return src
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((l) => l.replace(/\s+$/, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function pythonToBlocks(source: string): BlockSpec | undefined {
   const chunks = chunkify(source);
 

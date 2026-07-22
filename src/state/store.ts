@@ -18,7 +18,12 @@ interface AppState {
   connection: ConnectionState;
   connectionError: string | null;
   console: ConsoleEntry[];
+  /** JSON snapshot of the last explicitly-saved project. Empty until save. */
+  savedSnapshot: string;
   setProject: (p: AnyProject) => void;
+  /** Replace project AND mark the new state as the saved baseline (Open / Load). */
+  loadProject: (p: AnyProject) => void;
+  markSaved: () => void;
   setPythonPreview: (s: string) => void;
   updateSettings: (patch: Partial<ProjectSettings>) => void;
   setDevice: (d: DeviceClient | null) => void;
@@ -29,14 +34,19 @@ interface AppState {
 
 const MAX_CONSOLE = 500;
 
+const INITIAL_PROJECT = newBlocksProject();
+
 export const useApp = create<AppState>((set) => ({
-  project: newBlocksProject(),
+  project: INITIAL_PROJECT,
   pythonPreview: "",
   device: null,
   connection: "disconnected",
   connectionError: null,
   console: [],
+  savedSnapshot: JSON.stringify(INITIAL_PROJECT),
   setProject: (project) => set({ project }),
+  loadProject: (project) => set({ project, savedSnapshot: JSON.stringify(project) }),
+  markSaved: () => set((s) => ({ savedSnapshot: JSON.stringify(s.project) })),
   setPythonPreview: (pythonPreview) => set({ pythonPreview }),
   updateSettings: (patch) =>
     set((s) => ({
