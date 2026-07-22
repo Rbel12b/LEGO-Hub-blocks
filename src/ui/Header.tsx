@@ -1,14 +1,37 @@
+import { useState } from "react";
 import { useApp } from "../state/store";
 import { downloadProject, pickFile } from "../project/download";
-import type { AnyProject } from "../project/format";
+import type { AnyProject, BlocksProject } from "../project/format";
 import { newBlocksProject, newPythonProject } from "../project/format";
 
 interface Props {
   onOpenSettings: () => void;
 }
 
+function blocksProjectFromPython(source: string, title: string, settings: BlocksProject["settings"]): BlocksProject {
+  const base = newBlocksProject(title);
+  return {
+    ...base,
+    settings,
+    workspace: {
+      blocks: {
+        languageVersion: 0,
+        blocks: [
+          {
+            type: "on_program_start",
+            x: 40,
+            y: 40,
+            next: { block: { type: "raw_python", data: source } },
+          },
+        ],
+      },
+    },
+  };
+}
+
 export function Header({ onOpenSettings }: Props) {
   const { project, setProject } = useApp();
+  const [switchPrompt, setSwitchPrompt] = useState(false);
   const dark = project.type === "python";
 
   const rename = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -16,11 +39,22 @@ export function Header({ onOpenSettings }: Props) {
   };
 
   const toggleType = () => {
-    setProject(
-      project.type === "blocks"
-        ? { ...newPythonProject(project.title), settings: project.settings }
-        : { ...newBlocksProject(project.title), settings: project.settings },
-    );
+    if (project.type === "blocks") {
+      const source = useApp.getState().pythonPreview || "";
+      setProject({ ...newPythonProject(project.title), settings: project.settings, source });
+    } else {
+      setSwitchPrompt(true);
+    }
+  };
+
+  const confirmSwitch = (mode: "best-effort" | "discard") => {
+    if (project.type !== "python") return setSwitchPrompt(false);
+    if (mode === "best-effort") {
+      setProject(blocksProjectFromPython(project.source, project.title, project.settings));
+    } else {
+      setProject({ ...newBlocksProject(project.title), settings: project.settings });
+    }
+    setSwitchPrompt(false);
   };
 
   const openFile = async () => {
@@ -100,6 +134,75 @@ export function Header({ onOpenSettings }: Props) {
       <button type="button" onClick={openFile} style={btnStyle}>Open</button>
       <button type="button" onClick={() => downloadProject(project)} style={btnStyle}>Save</button>
       <button type="button" onClick={onOpenSettings} style={{ ...btnStyle, marginLeft: "auto" }}>Settings</button>
+      {switchPrompt && (
+        <SwitchToBlocksPrompt
+          dark={dark}
+          onCancel={() => setSwitchPrompt(false)}
+          onDiscard={() => confirmSwitch("discard")}
+          onBestEffort={() => confirmSwitch("best-effort")}
+        />
+      )}
     </header>
+  );
+}
+
+interface PromptProps {
+  dark: boolean;
+  onCancel: () => void;
+  onDiscard: () => void;
+  onBestEffort: () => void;
+}
+
+function SwitchToBlocksPrompt({ dark, onCancel, onDiscard, onBestEffort }: PromptProps) {
+  const overlay: React.CSSProperties = {
+    position: "fixed",
+    inset: 0,
+    background: dark ? "rgba(0,0,0,0.6)" : "rgba(11, 59, 72, 0.45)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+  };
+  const modal: React.CSSProperties = {
+    background: dark ? "#0b1216" : "#ffffff",
+    color: dark ? "#dff5fb" : "#0b3b48",
+    padding: 20,
+    borderRadius: 12,
+    maxWidth: 460,
+    border: dark ? "1px solid #164e63" : "1px solid #b6dbe4",
+    boxShadow: dark ? "0 10px 30px rgba(0,0,0,0.5)" : "0 10px 30px rgba(0,111,143,0.25)",
+  };
+  const btn: React.CSSProperties = {
+    padding: "6px 14px",
+    borderRadius: 6,
+    fontWeight: 600,
+    cursor: "pointer",
+    border: "1px solid #155e75",
+  };
+  return (
+    <div style={overlay} onClick={onCancel}>
+      <div style={modal} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ marginTop: 0 }}>Switch to Blocks?</h3>
+        <p style={{ fontSize: 14, lineHeight: 1.4 }}>
+          Python source can't be translated back into blocks. Choose how to proceed:
+        </p>
+        <ul style={{ fontSize: 13, lineHeight: 1.5, paddingLeft: 18 }}>
+          <li><strong>Best effort</strong> — keep the code inside a single "raw Python" block.</li>
+          <li><strong>Discard</strong> — start with an empty blocks workspace.</li>
+          <li><strong>Cancel</strong> — stay in Python mode.</li>
+        </ul>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={onCancel} style={{ ...btn, background: "transparent", color: dark ? "#dff5fb" : "#0b3b48", border: `1px solid ${dark ? "#164e63" : "#b6dbe4"}` }}>
+            Cancel
+          </button>
+          <button type="button" onClick={onDiscard} style={{ ...btn, background: "#b91c1c", color: "#fff", border: "1px solid #7f1d1d" }}>
+            Discard
+          </button>
+          <button type="button" onClick={onBestEffort} style={{ ...btn, background: "#0e7490", color: "#fff" }}>
+            Best effort
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

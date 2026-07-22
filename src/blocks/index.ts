@@ -8,12 +8,14 @@ import { SENSOR_BLOCKS } from "./defs/sensor";
 import { ADVANCED_HUB_BLOCKS } from "./defs/advanced_hub";
 import { ADVANCED_MOTOR_BLOCKS } from "./defs/advanced_motor";
 import { LVGL_BLOCKS } from "./defs/lvgl";
+import { RAW_BLOCKS } from "./defs/raw";
 import { registerHubGenerators } from "./generators/hub";
 import { registerMotorGenerators } from "./generators/motor";
 import { registerSensorGenerators } from "./generators/sensor";
 import { registerAdvancedHubGenerators } from "./generators/advanced_hub";
 import { registerAdvancedMotorGenerators } from "./generators/advanced_motor";
 import { registerLvglGenerators } from "./generators/lvgl";
+import { registerRawGenerators } from "./generators/raw";
 
 let registered = false;
 
@@ -30,6 +32,7 @@ export function registerAllBlocks(): void {
     ...ADVANCED_HUB_BLOCKS,
     ...ADVANCED_MOTOR_BLOCKS,
     ...LVGL_BLOCKS,
+    ...RAW_BLOCKS,
   ];
   Blockly.defineBlocksWithJsonArray(defs as unknown as object[]);
   // Strip the leading/trailing quote glyphs from the built-in `text` block by
@@ -46,6 +49,7 @@ export function registerAllBlocks(): void {
   registerAdvancedHubGenerators(pythonGenerator);
   registerAdvancedMotorGenerators(pythonGenerator);
   registerLvglGenerators(pythonGenerator);
+  registerRawGenerators(pythonGenerator);
 }
 
 export { pythonGenerator };
