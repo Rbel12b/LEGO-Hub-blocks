@@ -8,6 +8,15 @@ export type DeviceKind =
   | "motor"
   | "basic_motor";
 
+/** MicroPython class name in `lpf2.devices` for each internal DeviceKind slug. */
+export const DEVICE_CLASS: Record<DeviceKind, string> = {
+  motor: "encoder_motor",
+  basic_motor: "basic_motor",
+  color_sensor: "color_sensor",
+  distance_sensor: "distance_sensor",
+  color_distance_sensor: "color_distance_sensor",
+};
+
 /** Metadata registered per port during generator dispatch. */
 interface Registration {
   kind: DeviceKind;
@@ -85,8 +94,9 @@ function emit(gen: PythonGenerator, port: Port, reg: Registration): void {
   if (reg.collidedWith) {
     lines.push(`# WARN: port ${port} used as ${reg.kind} and ${reg.collidedWith}; keeping ${reg.kind}`);
   }
+  const className = DEVICE_CLASS[reg.kind];
   lines.push(`${varName} = hub.ports.${port}.device()`);
-  lines.push(`if not isinstance(${varName}, devices.${reg.kind}):`);
+  lines.push(`if not isinstance(${varName}, devices.${className}):`);
   lines.push(`    raise TypeError(${JSON.stringify(`Port ${port}: expected ${reg.kind}`)})`);
   for (const extra of reg.extras) lines.push(extra);
   (gen as unknown as { definitions_: Record<string, string> }).definitions_[`${KEY_SETUP_PREFIX}${port}`] = lines.join("\n");

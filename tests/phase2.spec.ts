@@ -53,7 +53,7 @@ describe("Phase 2 blocks", () => {
       }),
     );
     const py = workspaceToPython(ws);
-    expect(py).toContain("isinstance(dev_a, devices.motor)");
+    expect(py).toContain("isinstance(dev_a, devices.encoder_motor)");
     expect(py).toContain("dev_a.setAccTime(500, 1)");
   });
 

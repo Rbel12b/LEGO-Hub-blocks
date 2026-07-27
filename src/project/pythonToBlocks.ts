@@ -49,6 +49,15 @@ const DEVICE_KINDS = new Set<DeviceKind>([
   "basic_motor",
 ]);
 
+/** Reverse of DEVICE_CLASS: MicroPython class name → internal DeviceKind slug. */
+const CLASS_TO_KIND: Record<string, DeviceKind> = {
+  encoder_motor: "motor",
+  basic_motor: "basic_motor",
+  color_sensor: "color_sensor",
+  distance_sensor: "distance_sensor",
+  color_distance_sensor: "color_distance_sensor",
+};
+
 // ---------------------------------------------------------------------------
 // Expression tokenizer + parser
 // ---------------------------------------------------------------------------
@@ -809,11 +818,11 @@ function classifyDeviceGroup(g: Group, portKind: Map<string, DeviceKind>): { rol
   const second = g.bodyLines.find((l) => l.text !== "" && !l.text.startsWith("#"))?.text ?? "";
   const m = /^if not isinstance\(dev_([a-d]), devices\.(\w+)\):$/.exec(first);
   if (m && /^raise TypeError\(/.test(second)) {
-    const kind = m[2];
-    if (DEVICE_KINDS.has(kind as DeviceKind)) {
-      // Body should only have the raise line and blanks/comments.
+    const className = m[2];
+    const kind = CLASS_TO_KIND[className] ?? (DEVICE_KINDS.has(className as DeviceKind) ? (className as DeviceKind) : undefined);
+    if (kind) {
       const nonTrivial = g.bodyLines.filter((l) => l.text !== "" && !l.text.startsWith("#"));
-      if (nonTrivial.length === 1) return { role: "setup2", port: m[1], kind: kind as DeviceKind };
+      if (nonTrivial.length === 1) return { role: "setup2", port: m[1], kind };
     }
   }
   return { role: "opaque" };

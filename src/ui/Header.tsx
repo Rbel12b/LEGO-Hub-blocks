@@ -40,8 +40,8 @@ interface TranslationCheck {
 
 function checkTranslation(source: string, title: string, settings: BlocksProject["settings"]): TranslationCheck {
   const project = blocksProjectFromPython(source, title, settings);
-  const { chain } = pythonToBlocks(source);
-  const hasRaw = hasRawBlock(chain);
+  const { setup, loop } = pythonToBlocks(source);
+  const hasRaw = hasRawBlock(setup) || hasRawBlock(loop);
   const ws = new Blockly.Workspace();
   try {
     Blockly.serialization.workspaces.load(project.workspace as object, ws);
