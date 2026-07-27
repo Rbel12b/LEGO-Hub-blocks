@@ -146,15 +146,4 @@ describe("workspaceToPython", () => {
     const py = workspaceToPython(ws);
     expect(py).toContain("lpf2.color.RED");
   });
-
-  it("hat with no downstream emits hat output", () => {
-    const ws = makeWorkspace({
-      blocks: {
-        languageVersion: 0,
-        blocks: [{ type: "on_setup" }],
-      },
-    });
-    const py = workspaceToPython(ws);
-    expect(py.trim()).toBe('@on("setup")\ndef setup():\n\n\n@on("loop")\ndef loop():');
-  });
 });

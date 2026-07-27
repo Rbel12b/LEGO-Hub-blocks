@@ -51,9 +51,8 @@ export function workspaceToPython(workspace: Workspace): string {
   }
 
   const emitDefs: string[] = [];
-  if (setupBodies.length || loopBodies.length) {
-    (gen as unknown as { definitions_: Record<string, string> }).definitions_[HUB_ON_IMPORT_KEY] = "from hub import on";
-  }
+
+  (gen as unknown as { definitions_: Record<string, string> }).definitions_[HUB_ON_IMPORT_KEY] = "from hub import on";
 
   if (setupBodies.length) {
     const joined = setupBodies.join("").replace(/\s+$/, "");
