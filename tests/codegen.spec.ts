@@ -36,8 +36,8 @@ describe("workspaceToPython", () => {
   it("emits empty output for empty workspace", () => {
     const ws = new Blockly.Workspace();
     const py = workspaceToPython(ws);
-    expect(py).not.toContain("def setup():");
-    expect(py).not.toContain("def loop():");
+    expect(py).toContain("def setup():");
+    expect(py).toContain("def loop():");
   });
 
   it("ignores blocks not attached to a hat", () => {
@@ -147,7 +147,7 @@ describe("workspaceToPython", () => {
     expect(py).toContain("lpf2.color.RED");
   });
 
-  it("hat with no downstream emits empty output", () => {
+  it("hat with no downstream emits hat output", () => {
     const ws = makeWorkspace({
       blocks: {
         languageVersion: 0,
@@ -155,6 +155,6 @@ describe("workspaceToPython", () => {
       },
     });
     const py = workspaceToPython(ws);
-    expect(py.trim()).toBe("");
+    expect(py.trim()).toBe('@on("setup")\ndef setup():\n\n\n@on("loop")\ndef loop():');
   });
 });

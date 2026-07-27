@@ -54,13 +54,21 @@ export function workspaceToPython(workspace: Workspace): string {
   if (setupBodies.length || loopBodies.length) {
     (gen as unknown as { definitions_: Record<string, string> }).definitions_[HUB_ON_IMPORT_KEY] = "from hub import on";
   }
+
   if (setupBodies.length) {
     const joined = setupBodies.join("").replace(/\s+$/, "");
     emitDefs.push(`@on("setup")\ndef setup():\n${indentBody(joined)}`);
   }
+  else {
+    emitDefs.push(`@on("setup")\ndef setup():`);
+  }
+
   if (loopBodies.length) {
     const joined = loopBodies.join("").replace(/\s+$/, "");
     emitDefs.push(`@on("loop")\ndef loop():\n${indentBody(joined)}`);
+  }
+  else {
+    emitDefs.push(`@on("loop")\ndef loop():\n`);
   }
 
   const body = emitDefs.join("\n\n\n").replace(/\s+$/, "");
