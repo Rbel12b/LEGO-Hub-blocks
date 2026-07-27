@@ -62,11 +62,17 @@ export function DeviceBar() {
     if (!device) return;
     const code = project.type === "python" ? project.source : pythonPreview;
     if (!code.trim()) return;
+    const base = sanitizeFilename(project.title);
+    const path = (project.settings.allowRoot ? "/" : "/sd/") + base + ".py";
     setBusy(true);
-    appendConsole("info", "[run]\n");
+    appendConsole("info", `[run → ${path}]\n`);
     try {
-      const res = await device.run(code, { onStdout: (t) => appendConsole("out", t) });
-      if (res.stderr) appendConsole("err", res.stderr);
+      const bytes = new TextEncoder().encode(code);
+      await device.upload(path, bytes, {
+        policy: { allowRoot: project.settings.allowRoot },
+        autoRun: true,
+        onStdout: (t) => appendConsole("out", t),
+      });
     } catch (e) {
       appendConsole("err", `[run failed: ${(e as Error).message}]\n`);
     } finally {

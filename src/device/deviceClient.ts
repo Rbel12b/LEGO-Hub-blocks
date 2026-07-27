@@ -1,6 +1,6 @@
 import type { Transport } from "../transport/types";
-import { RawRepl } from "./rawRepl";
-import { autoRunSnippet, uploadFile, type UploadPolicy, type UploadResult } from "./fileTransfer";
+import { HubProtocol, validatePath, type UploadPolicy } from "./protocol";
+import { sanitizeFilename } from "../utils/sanitize";
 
 export type ConsoleSink = (text: string) => void;
 
@@ -16,93 +16,88 @@ export interface UploadRunOptions {
   onStdout?: ConsoleSink;
 }
 
+export interface UploadResult {
+  path: string;
+  length: number;
+}
+
+const TMP_RUN_NAME = "__web_run.py";
+
 /**
- * High-level device operations. Every user action (run/upload) first re-enters
- * raw REPL — which sends Ctrl-C x2 killing whatever is running (typically the
- * device's main.py LVGL menu). When the action finishes, softReset restarts
- * the device so main.py runs again.
+ * High-level device operations over the HubProtocol side channel.
+ * `run(code)` uploads the source as a temp file and asks the on-device runner
+ * to execute it via `runner.run_program(path)`. No raw REPL anywhere.
  */
 export class DeviceClient {
-  private repl: RawRepl;
+  private proto: HubProtocol;
   readonly transport: Transport;
 
   constructor(transport: Transport) {
     this.transport = transport;
-    this.repl = new RawRepl(transport);
+    this.proto = new HubProtocol(transport);
   }
 
   async connect(): Promise<void> {
     await this.transport.connect();
-    // Enter raw REPL now to interrupt any running main.py so subsequent actions
-    // start from a clean state.
-    await this.repl.enterRawRepl();
-    // Return control to main.py right away — user hasn't asked for anything yet.
-    await this.repl.softReset();
+    try {
+      await this.proto.ping(3000);
+    } catch {
+      // Firmware may not be up yet; caller can retry.
+    }
   }
 
   async disconnect(): Promise<void> {
-    // Leave device running main.py after disconnect. If we're still bootstrapped,
-    // soft-reset so the device resumes its idle menu.
-    try { await this.repl.softReset(); } catch { /* noop */ }
-    try { await this.repl.exitRawRepl(); } catch { /* noop */ }
-    this.repl.dispose();
+    try { await this.proto.stop(2000); } catch { /* noop */ }
+    this.proto.dispose();
     await this.transport.disconnect();
   }
 
   async run(code: string, opts: RunOptions = {}): Promise<{ stdout: string; stderr: string }> {
-    // enterRawRepl kills main.py (Ctrl-C x2) and re-enters raw mode.
-    await this.repl.enterRawRepl();
+    const path = `/sd/${TMP_RUN_NAME}`;
+    let stdout = "";
+    const sink = (t: string) => {
+      stdout += t;
+      opts.onStdout?.(t);
+    };
+    this.proto.setStdoutSink(sink);
     try {
-      return await this.repl.exec(code, { onStdout: opts.onStdout, timeoutMs: opts.timeoutMs });
+      const bytes = new TextEncoder().encode(code);
+      await this.proto.upload(path, bytes, 60000);
+      await this.proto.runProgram(path, opts.timeoutMs ?? 5000);
     } finally {
-      // Program has finished (or was stopped). Restart main.py.
-      await this.repl.softReset();
+      this.proto.setStdoutSink(null);
     }
+    return { stdout, stderr: "" };
   }
 
   async stop(): Promise<void> {
-    // Ctrl-C x2 raises KeyboardInterrupt in the running program. The pending
-    // run() will unblock, complete its tail frame, then softReset in its finally.
-    await this.repl.interrupt();
+    await this.proto.stop();
   }
 
-  /**
-   * Read a file from the device and return its text contents. Uses raw REPL
-   * exec of a base64 read snippet so binary safety isn't required for the
-   * .py sources we expect. Path is not validated here (device rejects invalid).
-   */
   async readFile(path: string, opts: { timeoutMs?: number } = {}): Promise<string> {
-    await this.repl.enterRawRepl();
-    try {
-      const snippet = [
-        `import sys`,
-        `_p = ${JSON.stringify(path)}`,
-        `with open(_p, "rb") as _f:`,
-        `    sys.stdout.buffer.write(_f.read())`,
-        ``,
-      ].join("\n");
-      const result = await this.repl.exec(snippet, { timeoutMs: opts.timeoutMs ?? 15000 });
-      if (result.stderr) throw new Error(result.stderr.trim());
-      return result.stdout;
-    } finally {
-      await this.repl.softReset();
-    }
+    const bytes = await this.proto.readFile(path, opts.timeoutMs ?? 15000);
+    return new TextDecoder().decode(bytes);
   }
 
   async upload(path: string, bytes: Uint8Array, opts: UploadRunOptions): Promise<UploadResult> {
-    await this.repl.enterRawRepl();
+    validatePath(path, opts.policy);
+    const sink = opts.onStdout ? (t: string) => opts.onStdout!(t) : null;
+    this.proto.setStdoutSink(sink);
     try {
-      const result = await uploadFile(this.repl, path, bytes, {
-        policy: opts.policy,
-        onProgress: opts.onProgress,
-      });
+      await this.proto.upload(path, bytes, 60000);
+      opts.onProgress?.(bytes.length, bytes.length);
       if (opts.autoRun) {
-        const run = await this.repl.exec(autoRunSnippet(path), { onStdout: opts.onStdout });
-        if (run.stderr) throw new Error(run.stderr.trim());
+        await this.proto.runProgram(path);
       }
-      return result;
     } finally {
-      await this.repl.softReset();
+      this.proto.setStdoutSink(null);
     }
+    return { path, length: bytes.length };
   }
+}
+
+/** Path web app uses for Run-button uploads. Exposed so UI can display it. */
+export function runButtonPath(projectTitle: string, allowRoot: boolean): string {
+  const base = sanitizeFilename(projectTitle);
+  return (allowRoot ? "/" : "/sd/") + base + ".py";
 }

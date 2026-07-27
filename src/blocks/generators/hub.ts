@@ -3,7 +3,8 @@ import { Order, type PythonGenerator } from "blockly/python";
 import { needsLpf2 } from "../setup";
 
 export function registerHubGenerators(gen: PythonGenerator): void {
-  gen.forBlock["on_program_start"] = () => "";
+  gen.forBlock["on_setup"] = () => "";
+  gen.forBlock["on_loop"] = () => "";
 
   gen.forBlock["hub_led_color"] = (block: Block) => {
     needsLpf2(gen);

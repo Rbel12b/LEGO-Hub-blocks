@@ -6,35 +6,64 @@ import { resetSetup } from "../blocks/setup";
 registerAllBlocks();
 
 const DEFS_SEPARATOR = "\n\n\n";
-const HAT_TYPE = "on_program_start";
+const SETUP_HAT = "on_setup";
+const LOOP_HAT = "on_loop";
 const PROC_TYPES = new Set(["procedures_defnoreturn", "procedures_defreturn"]);
+const HUB_ON_IMPORT_KEY = "hub_on_import";
+
+function indentBody(text: string): string {
+  const t = text.replace(/\s+$/, "");
+  if (!t) return "    pass";
+  return t
+    .split("\n")
+    .map((l) => (l.length ? "    " + l : l))
+    .join("\n");
+}
 
 /**
- * Emit Python for a workspace. Stacks under `on_program_start` hats run at
- * module top-level; procedure definitions become top-level `def`s via
- * Blockly's normal definitions_ machinery. Orphan blocks are ignored.
+ * Emit Python for a workspace. `on_setup` hat body becomes `def setup()`,
+ * `on_loop` cap body becomes `def loop()`, both registered via the runner's
+ * `@on("setup")` / `@on("loop")` decorators. Procedure defs become top-level
+ * `def`s via Blockly's normal definitions_ machinery. Orphan blocks are ignored.
  */
 export function workspaceToPython(workspace: Workspace): string {
   resetSetup();
   const gen = pythonGenerator;
   gen.init(workspace);
 
-  // Emit procedure definitions (their generators populate definitions_).
   for (const top of workspace.getTopBlocks(true)) {
     if (PROC_TYPES.has(top.type)) gen.blockToCode(top);
   }
 
-  const chunks: string[] = [];
+  const setupBodies: string[] = [];
+  const loopBodies: string[] = [];
   for (const top of workspace.getTopBlocks(true)) {
-    if (top.type !== HAT_TYPE) continue;
-    const next: Block | null = top.getNextBlock();
-    if (!next) continue;
-    const code = gen.blockToCode(next);
-    const text = Array.isArray(code) ? code[0] : code;
-    if (text) chunks.push(text);
+    if (top.type === SETUP_HAT) {
+      const next: Block | null = top.getNextBlock();
+      if (!next) continue;
+      const code = gen.blockToCode(next);
+      const text = Array.isArray(code) ? code[0] : code;
+      if (text) setupBodies.push(text);
+    } else if (top.type === LOOP_HAT) {
+      const body = gen.statementToCode(top, "DO");
+      if (body) loopBodies.push(body);
+    }
   }
 
-  const body = chunks.join("").replace(/\s+$/, "");
+  const emitDefs: string[] = [];
+  if (setupBodies.length || loopBodies.length) {
+    (gen as unknown as { definitions_: Record<string, string> }).definitions_[HUB_ON_IMPORT_KEY] = "from hub import on";
+  }
+  if (setupBodies.length) {
+    const joined = setupBodies.join("").replace(/\s+$/, "");
+    emitDefs.push(`@on("setup")\ndef setup():\n${indentBody(joined)}`);
+  }
+  if (loopBodies.length) {
+    const joined = loopBodies.join("").replace(/\s+$/, "");
+    emitDefs.push(`@on("loop")\ndef loop():\n${indentBody(joined)}`);
+  }
+
+  const body = emitDefs.join("\n\n\n").replace(/\s+$/, "");
   const combined = gen.finish("");
   (gen as unknown as { definitions_: Record<string, string> }).definitions_ = {};
 

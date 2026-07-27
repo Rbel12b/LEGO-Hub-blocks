@@ -9,7 +9,7 @@ function underHat(next: object): object {
   return {
     blocks: {
       languageVersion: 0,
-      blocks: [{ type: "on_program_start", next: { block: next } }],
+      blocks: [{ type: "on_setup", next: { block: next } }],
     },
   };
 }

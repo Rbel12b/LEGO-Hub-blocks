@@ -5,13 +5,13 @@ import { workspaceToPython } from "../src/codegen/pythonGen";
 import { pythonToBlocks, type BlockSpec } from "../src/project/pythonToBlocks";
 
 function translate(source: string): BlockSpec | undefined {
-  return pythonToBlocks(source).chain;
+  return pythonToBlocks(source).setup;
 }
 
 beforeEach(() => registerAllBlocks());
 
 function underHat(chain: BlockSpec | undefined): object {
-  const hat: Record<string, unknown> = { type: "on_program_start" };
+  const hat: Record<string, unknown> = { type: "on_setup" };
   if (chain) hat.next = { block: chain };
   return { blocks: { languageVersion: 0, blocks: [hat] } };
 }

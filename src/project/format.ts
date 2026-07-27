@@ -56,7 +56,10 @@ export function newBlocksProject(title = "Untitled"): BlocksProject {
     workspace: {
       blocks: {
         languageVersion: 0,
-        blocks: [{ type: "on_program_start", x: 40, y: 40 }],
+        blocks: [
+          { type: "on_setup", x: 40, y: 40 },
+          { type: "on_loop", x: 40, y: 160 },
+        ],
       },
     },
   };

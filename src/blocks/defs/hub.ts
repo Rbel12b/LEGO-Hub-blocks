@@ -29,14 +29,24 @@ export const IMU_AXIS = [
   ["roll", "roll"],
 ] as const;
 
-/** Hat / event blocks. Only chains under these execute at program start. */
+/** Hat / event blocks. Chains under these become setup()/loop() on the hub runner. */
 export const EVENT_BLOCKS = [
   {
-    type: "on_program_start",
-    message0: "when program starts",
+    type: "on_setup",
+    message0: "setup",
     nextStatement: null,
     colour: 45,
-    tooltip: "Entry point. Blocks attached here run when the program starts.",
+    tooltip: "Runs once when program starts. Body becomes `def setup()` on device.",
+  },
+  {
+    type: "on_loop",
+    message0: "loop %1 %2",
+    args0: [
+      { type: "input_dummy" },
+      { type: "input_statement", name: "DO" },
+    ],
+    colour: 45,
+    tooltip: "Runs repeatedly. Body becomes `def loop()` on device. Runner exits when center held 2s.",
   },
 ] as const;
 

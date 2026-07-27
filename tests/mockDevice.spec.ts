@@ -9,22 +9,22 @@ async function makeClient(opts?: Parameters<typeof MockTransport>[0]) {
   return { transport, client };
 }
 
-describe("MockTransport + DeviceClient", () => {
-  it("connects and enters raw REPL", async () => {
+describe("MockTransport + DeviceClient (HubProtocol)", () => {
+  it("connects and pings", async () => {
     const { client } = await makeClient();
     await client.disconnect();
   });
 
-  it("runs code and returns seeded stdout", async () => {
+  it("run() uploads temp file, triggers RUN, streams stdout", async () => {
     const { transport, client } = await makeClient();
     transport.setNextStdout("hello\n");
     const res = await client.run("print('hello')");
     expect(res.stdout).toBe("hello\n");
-    expect(res.stderr).toBe("");
+    expect(transport.files["/sd/__web_run.py"]).toBeDefined();
     await client.disconnect();
   });
 
-  it("uploads a file and records it in mock FS", async () => {
+  it("upload() records file in mock FS", async () => {
     const { transport, client } = await makeClient();
     const bytes = new TextEncoder().encode("print('uploaded')\n");
     await client.upload("/sd/foo.py", bytes, {
@@ -35,14 +35,21 @@ describe("MockTransport + DeviceClient", () => {
     await client.disconnect();
   });
 
-  it("rejects forbidden paths server-side even if client is bypassed", async () => {
+  it("rejects forbidden paths client-side", async () => {
     const { client } = await makeClient();
     const bytes = new TextEncoder().encode("x");
-    // Bypass client-side check by calling internal raw path — instead just
-    // verify client validation catches it.
     await expect(
       client.upload("/main.py", bytes, { policy: { allowRoot: true }, autoRun: false }),
     ).rejects.toThrow(/forbidden/i);
+    await client.disconnect();
+  });
+
+  it("readFile() returns uploaded contents", async () => {
+    const { client } = await makeClient();
+    const bytes = new TextEncoder().encode("data\n");
+    await client.upload("/sd/x.py", bytes, { policy: { allowRoot: false }, autoRun: false });
+    const back = await client.readFile("/sd/x.py");
+    expect(back).toBe("data\n");
     await client.disconnect();
   });
 });

@@ -23,7 +23,8 @@ export interface BlockSpec {
 }
 
 export interface Translation {
-  chain: BlockSpec | undefined;
+  setup: BlockSpec | undefined;
+  loop: BlockSpec | undefined;
   variables: { name: string; id: string }[];
 }
 
@@ -428,6 +429,7 @@ function isPreambleBoilerplate(line: string): boolean {
   if (line === "") return true;
   if (/^import\s/.test(line)) return true;
   if (/^from\s/.test(line)) return true;
+  if (/^@on\(/.test(line)) return true;
   if (line === "hub.lcd.init()") return true;
   if (line === "_scr = lv.screen_active()") return true;
   return false;
@@ -867,10 +869,19 @@ export function pythonToBlocks(source: string): Translation {
     vars: new Set(),
   };
 
-  // Group at outer indent (0).
   const { groups } = groupAt(lines, 0, lines.length, 0);
 
-  // Pass 1: scan all groups (any depth) for setup2 to infer port kinds.
+  const setupGroups: Group[] = [];
+  const loopGroups: Group[] = [];
+  const strayGroups: Group[] = [];
+  for (const g of groups) {
+    const t = g.header.text;
+    if (t === "def setup():") { setupGroups.push(...bodyToGroups(g.bodyLines)); continue; }
+    if (t === "def loop():") { loopGroups.push(...bodyToGroups(g.bodyLines)); continue; }
+    strayGroups.push(g);
+  }
+
+  const walkable = [...strayGroups, ...setupGroups, ...loopGroups];
   const walkGroups = (gs: Group[], visit: (g: Group) => void) => {
     for (const g of gs) {
       visit(g);
@@ -880,22 +891,38 @@ export function pythonToBlocks(source: string): Translation {
       if (sub.length) walkGroups(sub, visit);
     }
   };
-  walkGroups(groups, (g) => {
+  walkGroups(walkable, (g) => {
     const cd = classifyDeviceGroup(g, ctx.portKind);
     if (cd.role === "setup2" && cd.port && cd.kind) ctx.portKind.set(cd.port, cd.kind);
   });
-
-  // Pass 2: mark keepRaw ports.
-  walkGroups(groups, (g) => {
+  walkGroups(walkable, (g) => {
     const refs = refsInGroup(g);
     if (refs.size === 0) return;
     const cd = classifyDeviceGroup(g, ctx.portKind);
     if (cd.role === "opaque") for (const p of refs) ctx.keepRaw.add(p);
   });
 
-  // Pass 3: emit.
-  const specs = translateGroups(groups, ctx);
-  const chainResult = chain(specs);
+  const hasHats = setupGroups.length > 0 || loopGroups.length > 0;
+  let setupSpecs: BlockSpec[];
+  let loopSpecs: BlockSpec[];
+  if (hasHats) {
+    setupSpecs = translateGroups(setupGroups, ctx);
+    loopSpecs = translateGroups(loopGroups, ctx);
+    const straySpecs = translateGroups(strayGroups, ctx);
+    setupSpecs = [...straySpecs, ...setupSpecs];
+  } else {
+    setupSpecs = translateGroups(strayGroups, ctx);
+    loopSpecs = [];
+  }
+
   const variables = [...ctx.vars].map((name) => ({ name, id: name }));
-  return { chain: chainResult, variables };
+  return { setup: chain(setupSpecs), loop: chain(loopSpecs), variables };
+}
+
+function bodyToGroups(bodyLines: Line[]): Group[] {
+  if (bodyLines.length === 0) return [];
+  const first = bodyLines.find((l) => l.text !== "" && !l.text.startsWith("#"));
+  if (!first) return [];
+  const baseIndent = first.indent;
+  return groupAt(bodyLines, 0, bodyLines.length, baseIndent).groups;
 }

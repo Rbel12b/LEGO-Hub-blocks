@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildUploadSnippet, validatePath, UploadError } from "../src/device/fileTransfer";
+import { validatePath, UploadError, HubProtocol } from "../src/device/protocol";
+import { MockTransport } from "../src/transport/mock";
 
-describe("fileTransfer.validatePath", () => {
+describe("protocol.validatePath", () => {
   it("accepts /sd/ paths by default", () => {
     validatePath("/sd/prog.py", { allowRoot: false });
   });
@@ -14,27 +15,44 @@ describe("fileTransfer.validatePath", () => {
     validatePath("/prog.py", { allowRoot: true });
   });
 
-  it("always rejects /main.py, /boot.py, /boot.mpy", () => {
-    for (const p of ["/main.py", "/boot.py", "/boot.mpy"]) {
+  it("always rejects /main.py, /boot.py, /boot.mpy, /runner.py", () => {
+    for (const p of ["/main.py", "/boot.py", "/boot.mpy", "/runner.py"]) {
       expect(() => validatePath(p, { allowRoot: true })).toThrow(/forbidden/i);
     }
   });
 });
 
-describe("fileTransfer.buildUploadSnippet", () => {
-  it("embeds path and length and re-checks forbidden list server-side", () => {
-    const s = buildUploadSnippet("/sd/x.py", 42);
-    expect(s).toContain(`_p = "/sd/x.py"`);
-    expect(s).toContain(`_l = 42`);
-    expect(s).toContain(`"/main.py"`);
-    expect(s).toContain(`"/boot.py"`);
-    expect(s).toContain(`"/boot.mpy"`);
-    expect(s).toContain(`sys.stdin.buffer.read`);
-    expect(s).toContain(`print("OK", _p, _l)`);
+describe("HubProtocol frame IO", () => {
+  it("PING → OK", async () => {
+    const transport = new MockTransport();
+    await transport.connect();
+    const proto = new HubProtocol(transport);
+    await expect(proto.ping()).resolves.toBeUndefined();
+    proto.dispose();
+    await transport.disconnect();
   });
 
-  it("escapes path with JSON.stringify", () => {
-    const s = buildUploadSnippet('/sd/na"me.py', 1);
-    expect(s).toContain(`_p = "/sd/na\\"me.py"`);
+  it("UPLOAD + READ roundtrip", async () => {
+    const transport = new MockTransport();
+    await transport.connect();
+    const proto = new HubProtocol(transport);
+    const bytes = new TextEncoder().encode("print('hi')\n");
+    await proto.upload("/sd/x.py", bytes);
+    const back = await proto.readFile("/sd/x.py");
+    expect(new TextDecoder().decode(back)).toBe("print('hi')\n");
+    proto.dispose();
+    await transport.disconnect();
+  });
+
+  it("RUN streams stdout then OK", async () => {
+    const transport = new MockTransport({ files: { "/sd/y.py": new Uint8Array([1]) }, stdout: "hello\n" });
+    await transport.connect();
+    const proto = new HubProtocol(transport);
+    let out = "";
+    proto.setStdoutSink((t) => { out += t; });
+    await proto.runProgram("/sd/y.py");
+    expect(out).toBe("hello\n");
+    proto.dispose();
+    await transport.disconnect();
   });
 });
