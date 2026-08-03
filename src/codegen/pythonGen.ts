@@ -59,7 +59,7 @@ export function workspaceToPython(workspace: Workspace): string {
     emitDefs.push(`@on("setup")\ndef setup():\n${indentBody(joined)}`);
   }
   else {
-    emitDefs.push(`@on("setup")\ndef setup():`);
+    emitDefs.push(`@on("setup")\ndef setup():\n    pass`);
   }
 
   if (loopBodies.length) {
@@ -67,7 +67,7 @@ export function workspaceToPython(workspace: Workspace): string {
     emitDefs.push(`@on("loop")\ndef loop():\n${indentBody(joined)}`);
   }
   else {
-    emitDefs.push(`@on("loop")\ndef loop():\n`);
+    emitDefs.push(`@on("loop")\ndef loop():\n    pass`);
   }
 
   const body = emitDefs.join("\n\n\n").replace(/\s+$/, "");
