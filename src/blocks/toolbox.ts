@@ -17,6 +17,7 @@ interface ToolboxDef {
  */
 const NUM_SHADOWS: Record<string, Record<string, number>> = {
   hub_led_rgb: { R: 255, G: 255, B: 255 },
+  hub_wait: { SECONDS: 1 },
   motor_start_speed: { SPEED: 50 },
   motor_start_power: { POWER: 50 },
   motor_run_for_time: { MS: 1000, SPEED: 50 },
@@ -82,28 +83,6 @@ const STANDARD_CATEGORIES = [
       { kind: "block", type: "logic_operation" },
       { kind: "block", type: "logic_negate" },
       { kind: "block", type: "logic_boolean" },
-    ],
-  },
-  {
-    kind: "category",
-    name: "Loops",
-    categorystyle: "loop_category",
-    contents: [
-      {
-        kind: "block",
-        type: "controls_repeat_ext",
-        inputs: { TIMES: { shadow: { type: "math_number", fields: { NUM: 10 } } } },
-      },
-      { kind: "block", type: "controls_whileUntil" },
-      {
-        kind: "block",
-        type: "controls_for",
-        inputs: {
-          FROM: { shadow: { type: "math_number", fields: { NUM: 1 } } },
-          TO: { shadow: { type: "math_number", fields: { NUM: 10 } } },
-          BY: { shadow: { type: "math_number", fields: { NUM: 1 } } },
-        },
-      },
     ],
   },
   {
@@ -174,17 +153,44 @@ function categoryOf(defs: readonly ToolboxDef[], name: string, colour: string, s
   return { kind: "category", name, colour, contents };
 }
 
+const LOOP_BLOCKS = [
+  {
+    kind: "block",
+    type: "controls_repeat_ext",
+    inputs: { TIMES: { shadow: { type: "math_number", fields: { NUM: 10 } } } },
+  },
+  { kind: "block", type: "controls_whileUntil" },
+  {
+    kind: "block",
+    type: "controls_for",
+    inputs: {
+      FROM: { shadow: { type: "math_number", fields: { NUM: 1 } } },
+      TO: { shadow: { type: "math_number", fields: { NUM: 10 } } },
+      BY: { shadow: { type: "math_number", fields: { NUM: 1 } } },
+    },
+  },
+];
+
 export function buildToolbox(showAdvanced: boolean) {
   const screenCategory = showAdvanced ? [categoryOf(LVGL_BLOCKS, "Screen", "280", true)] : [];
+  const eventContents = EVENT_BLOCKS
+    .filter((d) => showAdvanced || !(d as { advanced?: boolean }).advanced)
+    .map((d) => blockWithShadows(d.type));
+  const controlCategory = {
+    kind: "category",
+    name: "Control",
+    colour: "45",
+    contents: [...eventContents, ...LOOP_BLOCKS],
+  };
   return {
     kind: "categoryToolbox",
     contents: [
-      categoryOf(EVENT_BLOCKS, "Events", "45", showAdvanced),
       categoryOf([...HUB_BLOCKS, ...ADVANCED_HUB_BLOCKS], "Hub", "210", showAdvanced),
       categoryOf([...MOTOR_BLOCKS, ...ADVANCED_MOTOR_BLOCKS], "Motor", "160", showAdvanced),
       categoryOf(SENSOR_BLOCKS, "Sensor", "260", showAdvanced),
       ...screenCategory,
       { kind: "sep" },
+      controlCategory,
       ...STANDARD_CATEGORIES,
     ],
   };

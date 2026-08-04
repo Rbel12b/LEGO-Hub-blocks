@@ -91,7 +91,7 @@ export class DeviceClient {
   }
 
   async readFile(path: string, opts: { timeoutMs?: number } = {}): Promise<string> {
-    const bytes = await this.proto.readFile(path, opts.timeoutMs ?? 3000);
+    const bytes = await this.proto.readFile(path, opts.timeoutMs ?? 10000);
     return new TextDecoder().decode(bytes);
   }
 

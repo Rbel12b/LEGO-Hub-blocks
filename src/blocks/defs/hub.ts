@@ -48,6 +48,16 @@ export const EVENT_BLOCKS = [
     colour: 45,
     tooltip: "Runs repeatedly. Body becomes `def loop()` on device. Runner exits when center held 2s.",
   },
+  {
+    type: "hub_wait",
+    message0: "wait %1 seconds",
+    args0: [{ type: "input_value", name: "SECONDS", check: "Number" }],
+    previousStatement: null,
+    nextStatement: null,
+    colour: 45,
+    inputsInline: true,
+    tooltip: "Sleep for SECONDS. Polls hub buttons during the wait so callbacks still fire.",
+  },
 ] as const;
 
 export const HUB_BLOCKS = [

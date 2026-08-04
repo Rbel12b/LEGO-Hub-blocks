@@ -6,6 +6,12 @@ export function registerHubGenerators(gen: PythonGenerator): void {
   gen.forBlock["on_setup"] = () => "";
   gen.forBlock["on_loop"] = () => "";
 
+  gen.forBlock["hub_wait"] = (block: Block) => {
+    needsLpf2(gen);
+    const s = gen.valueToCode(block, "SECONDS", Order.NONE) || "0";
+    return `hub.sleep(${s})\n`;
+  };
+
   gen.forBlock["hub_led_color"] = (block: Block) => {
     needsLpf2(gen);
     const color = block.getFieldValue("COLOR");
