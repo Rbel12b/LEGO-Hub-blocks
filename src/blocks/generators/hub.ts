@@ -15,7 +15,7 @@ export function registerHubGenerators(gen: PythonGenerator): void {
 
   gen.forBlock["hub_quit"] = () => {
     needsLpf2(gen);
-    return "hub.exit();hub.sleep(1)\n";
+    return "hub.exit()\n";
   };
 
   gen.forBlock["hub_led_color"] = (block: Block) => {

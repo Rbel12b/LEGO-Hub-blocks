@@ -6,7 +6,7 @@ export function downloadProject(project: AnyProject): void {
     sanitizeFilename(project.title) + (project.type === "blocks" ? ".blocksproj.json" : ".py");
   const content =
     project.type === "blocks"
-      ? JSON.stringify(project, null, 2)
+      ? JSON.stringify(project, null, 0)
       : project.source;
   const blob = new Blob([content], {
     type: project.type === "blocks" ? "application/json" : "text/x-python",
