@@ -91,6 +91,17 @@ export const HUB_BLOCKS = [
     colour: 210,
   },
   {
+    type: "on_button_pressed",
+    message0: "on button %1 pressed %2 %3",
+    args0: [
+      { type: "field_dropdown", name: "BTN", options: [...BUTTON_OPTIONS] },
+      { type: "input_dummy" },
+      { type: "input_statement", name: "DO" },
+    ],
+    colour: 210,
+    tooltip: "Hat. Body runs on rising edge of the selected button. Registered via `hub.buttons.on(name)`; fires inside `hub.buttons.poll()`.",
+  },
+  {
     type: "hub_button_poll",
     message0: "poll hub buttons",
     previousStatement: null,

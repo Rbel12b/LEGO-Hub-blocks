@@ -13,7 +13,7 @@ interface Props {
 
 function blocksProjectFromPython(source: string, title: string, settings: BlocksProject["settings"]): BlocksProject {
   const base = newBlocksProject(title);
-  const { setup, loop, variables } = pythonToBlocks(source);
+  const { setup, loop, buttonHats, variables } = pythonToBlocks(source);
   const topBlocks: Record<string, unknown>[] = [];
   const setupHat: Record<string, unknown> = { type: "on_setup", x: 40, y: 40 };
   if (setup) setupHat.next = { block: setup };
@@ -21,6 +21,16 @@ function blocksProjectFromPython(source: string, title: string, settings: Blocks
   const loopBlock: Record<string, unknown> = { type: "on_loop", x: 40, y: 160 };
   if (loop) loopBlock.inputs = { DO: { block: loop } };
   topBlocks.push(loopBlock);
+  buttonHats.forEach((h, i) => {
+    const b: Record<string, unknown> = {
+      type: "on_button_pressed",
+      x: 320,
+      y: 40 + i * 140,
+      fields: { BTN: h.btn },
+    };
+    if (h.chain) b.inputs = { DO: { block: h.chain } };
+    topBlocks.push(b);
+  });
   const workspace: Record<string, unknown> = {
     blocks: {
       languageVersion: 0,

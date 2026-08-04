@@ -5,6 +5,7 @@ import { needsLpf2 } from "../setup";
 export function registerHubGenerators(gen: PythonGenerator): void {
   gen.forBlock["on_setup"] = () => "";
   gen.forBlock["on_loop"] = () => "";
+  gen.forBlock["on_button_pressed"] = () => "";
 
   gen.forBlock["hub_wait"] = (block: Block) => {
     needsLpf2(gen);
