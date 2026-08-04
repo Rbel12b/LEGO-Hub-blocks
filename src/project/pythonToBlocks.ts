@@ -360,6 +360,9 @@ function matchStatement(line: string): BlockSpec | null {
     return { type: "hub_led_rgb", inputs: { ...numInput("R", m[1]), ...numInput("G", m[2]), ...numInput("B", m[3]) } };
   }
   if (line === "hub.buttons.poll()") return { type: "hub_button_poll" };
+  if ((m = /^hub\.sleep\((-?\d+(?:\.\d+)?)\)$/.exec(line))) {
+    return { type: "hub_wait", inputs: numInput("SECONDS", m[1]) };
+  }
   if (line === "hub.imu.reset()") return { type: "hub_imu_reset" };
   if (line === "hub.powerOff()") return { type: "hub_poweroff" };
   if ((m = /^hub\.log\.setLevel\((\d)\)$/.exec(line))) {

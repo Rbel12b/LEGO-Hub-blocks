@@ -56,6 +56,8 @@ Monaco providers, only the transport differs.
 | [vite.config.ts](../vite.config.ts) | `worker: { format: 'es' }` so the Pyright worker bundles as an ES module. |
 | [docs/lsp-server/index.js](lsp-server/index.js) | WebSocket ↔ Pyright stdio bridge. Adds/strips `Content-Length` framing. |
 | [docs/lsp-server/package.json](lsp-server/package.json) | Standalone deps (`pyright`, `ws`). |
+| [scripts/sync-stubs.mjs](../scripts/sync-stubs.mjs) | Refreshes `src/editor/lsp/stubs/files/` from a local `Lpf2-micropython` checkout — copies `stubs/`, `modules/Lpf2/stubs/lpf2/`, merges `typings/`, then appends per-file overlays from `scripts/stubs-overlay/`. Preserves `pyrightconfig.json`. |
+| [scripts/stubs-overlay/](../scripts/stubs-overlay/) | Shim additions merged on top of fw-sourced stubs. Declares symbols that live in the on-device Python shim layer but aren't in the firmware C-module stubs (e.g. `hub.sleep`, `hub.sleep_ms`). |
 
 ## Where to change X
 
@@ -65,6 +67,8 @@ Monaco providers, only the transport differs.
 - **Change LSP mode default** — `DEFAULT_SETTINGS.lspMode` in `src/project/format.ts`.
 - **Point at a different Pyright version** — bump `docs/lsp-server/package.json` (the client-side worker does not use Pyright itself).
 - **Refresh the LVGL stub** — replace `src/editor/lsp/stubs/files/lvgl.pyi` verbatim. Do not hand-edit; it's generated.
+- **Refresh all stubs from firmware** — `npm run sync-stubs -- --src ../Lpf2-micropython`. Copies whole `stubs/`, `modules/Lpf2/stubs/lpf2/`, and merges `typings/` into `src/editor/lsp/stubs/files/`, then appends per-file overlays from `scripts/stubs-overlay/`. Re-run after any fw stub change.
+- **Add a hub Python-shim symbol** (not in fw C-module stubs) — add its `.pyi` fragment to `scripts/stubs-overlay/<module>.pyi`, then re-run `npm run sync-stubs`. The fragment is appended to the fw-sourced stub of the same relative path. Use this for `hub.sleep`, `hub.sleep_ms`, and any other on-device Python shim additions.
 
 ## Known limits
 
