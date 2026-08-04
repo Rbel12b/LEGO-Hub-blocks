@@ -58,6 +58,13 @@ export const EVENT_BLOCKS = [
     inputsInline: true,
     tooltip: "Sleep for SECONDS. Polls hub buttons during the wait so callbacks still fire.",
   },
+  {
+    type: "hub_quit",
+    message0: "quit program",
+    previousStatement: null,
+    colour: 0,
+    tooltip: "Stop the user program. Runner exits after the current loop tick / sleep returns.",
+  },
 ] as const;
 
 export const HUB_BLOCKS = [

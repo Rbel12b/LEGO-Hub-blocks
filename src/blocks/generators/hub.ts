@@ -13,6 +13,11 @@ export function registerHubGenerators(gen: PythonGenerator): void {
     return `hub.sleep(${s})\n`;
   };
 
+  gen.forBlock["hub_quit"] = () => {
+    needsLpf2(gen);
+    return "hub.exit();hub.sleep(1)\n";
+  };
+
   gen.forBlock["hub_led_color"] = (block: Block) => {
     needsLpf2(gen);
     const color = block.getFieldValue("COLOR");
