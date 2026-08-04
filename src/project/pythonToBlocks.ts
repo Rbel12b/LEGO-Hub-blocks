@@ -22,9 +22,15 @@ export interface BlockSpec {
   next?: { block: BlockSpec };
 }
 
+export interface ButtonHat {
+  btn: string;
+  chain: BlockSpec | undefined;
+}
+
 export interface Translation {
   setup: BlockSpec | undefined;
   loop: BlockSpec | undefined;
+  buttonHats: ButtonHat[];
   variables: { name: string; id: string }[];
 }
 
@@ -360,8 +366,12 @@ function matchStatement(line: string): BlockSpec | null {
     return { type: "hub_led_rgb", inputs: { ...numInput("R", m[1]), ...numInput("G", m[2]), ...numInput("B", m[3]) } };
   }
   if (line === "hub.buttons.poll()") return { type: "hub_button_poll" };
+  if ((m = /^hub\.sleep\((-?\d+(?:\.\d+)?)\)$/.exec(line))) {
+    return { type: "hub_wait", inputs: numInput("SECONDS", m[1]) };
+  }
   if (line === "hub.imu.reset()") return { type: "hub_imu_reset" };
   if (line === "hub.powerOff()") return { type: "hub_poweroff" };
+  if (line === "hub.exit()") return { type: "hub_quit" };
   if ((m = /^hub\.log\.setLevel\((\d)\)$/.exec(line))) {
     if (LOG_LEVELS.has(m[1])) return { type: "hub_log_level", fields: { LEVEL: m[1] } };
   }
@@ -893,14 +903,27 @@ export function pythonToBlocks(source: string): Translation {
   const setupGroups: Group[] = [];
   const loopGroups: Group[] = [];
   const strayGroups: Group[] = [];
-  for (const g of groups) {
+  const buttonHatGroups: { btn: string; body: Line[] }[] = [];
+  const BTN_DECO = /^@hub\.buttons\.on\(\s*["'](center|up|down|left|right)["']\s*\)$/;
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
     const t = g.header.text;
     if (t === "def setup():") { setupGroups.push(...bodyToGroups(g.bodyLines)); continue; }
     if (t === "def loop():") { loopGroups.push(...bodyToGroups(g.bodyLines)); continue; }
+    const dm = BTN_DECO.exec(t);
+    if (dm) {
+      const next = groups[i + 1];
+      if (next && /^def\s+\w+\(\s*\)\s*:$/.test(next.header.text)) {
+        buttonHatGroups.push({ btn: dm[1], body: next.bodyLines });
+        i++;
+        continue;
+      }
+    }
     strayGroups.push(g);
   }
 
-  const walkable = [...strayGroups, ...setupGroups, ...loopGroups];
+  const btnHatBodyGroups: Group[][] = buttonHatGroups.map((h) => bodyToGroups(h.body));
+  const walkable = [...strayGroups, ...setupGroups, ...loopGroups, ...btnHatBodyGroups.flat()];
   const walkGroups = (gs: Group[], visit: (g: Group) => void) => {
     for (const g of gs) {
       visit(g);
@@ -934,8 +957,13 @@ export function pythonToBlocks(source: string): Translation {
     loopSpecs = [];
   }
 
+  const buttonHats: ButtonHat[] = buttonHatGroups.map((h, i) => ({
+    btn: h.btn,
+    chain: chain(translateGroups(btnHatBodyGroups[i], ctx)),
+  }));
+
   const variables = [...ctx.vars].map((name) => ({ name, id: name }));
-  return { setup: chain(setupSpecs), loop: chain(loopSpecs), variables };
+  return { setup: chain(setupSpecs), loop: chain(loopSpecs), buttonHats, variables };
 }
 
 function bodyToGroups(bodyLines: Line[]): Group[] {

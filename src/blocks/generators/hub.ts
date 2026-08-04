@@ -5,6 +5,18 @@ import { needsLpf2 } from "../setup";
 export function registerHubGenerators(gen: PythonGenerator): void {
   gen.forBlock["on_setup"] = () => "";
   gen.forBlock["on_loop"] = () => "";
+  gen.forBlock["on_button_pressed"] = () => "";
+
+  gen.forBlock["hub_wait"] = (block: Block) => {
+    needsLpf2(gen);
+    const s = gen.valueToCode(block, "SECONDS", Order.NONE) || "0";
+    return `hub.sleep(${s})\n`;
+  };
+
+  gen.forBlock["hub_quit"] = () => {
+    needsLpf2(gen);
+    return "hub.exit();hub.sleep(1)\n";
+  };
 
   gen.forBlock["hub_led_color"] = (block: Block) => {
     needsLpf2(gen);

@@ -48,6 +48,23 @@ export const EVENT_BLOCKS = [
     colour: 45,
     tooltip: "Runs repeatedly. Body becomes `def loop()` on device. Runner exits when center held 2s.",
   },
+  {
+    type: "hub_wait",
+    message0: "wait %1 seconds",
+    args0: [{ type: "input_value", name: "SECONDS", check: "Number" }],
+    previousStatement: null,
+    nextStatement: null,
+    colour: 45,
+    inputsInline: true,
+    tooltip: "Sleep for SECONDS. Polls hub buttons during the wait so callbacks still fire.",
+  },
+  {
+    type: "hub_quit",
+    message0: "quit program",
+    previousStatement: null,
+    colour: 0,
+    tooltip: "Stop the user program. Runner exits after the current loop tick / sleep returns.",
+  },
 ] as const;
 
 export const HUB_BLOCKS = [
@@ -79,6 +96,17 @@ export const HUB_BLOCKS = [
     args0: [{ type: "field_dropdown", name: "BTN", options: [...BUTTON_OPTIONS] }],
     output: "Boolean",
     colour: 210,
+  },
+  {
+    type: "on_button_pressed",
+    message0: "on button %1 pressed %2 %3",
+    args0: [
+      { type: "field_dropdown", name: "BTN", options: [...BUTTON_OPTIONS] },
+      { type: "input_dummy" },
+      { type: "input_statement", name: "DO" },
+    ],
+    colour: 210,
+    tooltip: "Hat. Body runs on rising edge of the selected button. Registered via `hub.buttons.on(name)`; fires inside `hub.buttons.poll()`.",
   },
   {
     type: "hub_button_poll",

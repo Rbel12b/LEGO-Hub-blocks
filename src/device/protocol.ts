@@ -135,7 +135,7 @@ export class HubProtocol {
     if (reply.kind !== "OK") throw new Error(reply.message || "UPLOAD failed");
   }
 
-  async readFile(path: string, timeoutMs = 3000): Promise<Uint8Array> {
+  async readFile(path: string, timeoutMs = 10000): Promise<Uint8Array> {
     const reply = await this.send(enc.encode(`#FR:READ ${path}\n`), timeoutMs);
     if (reply.kind === "ERR") throw new Error(reply.message);
     if (reply.kind !== "DATA" || !reply.data) throw new Error("READ: expected DATA reply");

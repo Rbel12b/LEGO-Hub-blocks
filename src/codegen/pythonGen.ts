@@ -8,6 +8,8 @@ registerAllBlocks();
 const DEFS_SEPARATOR = "\n\n\n";
 const SETUP_HAT = "on_setup";
 const LOOP_HAT = "on_loop";
+const BUTTON_HAT = "on_button_pressed";
+const VALID_BUTTONS = new Set(["center", "up", "down", "left", "right"]);
 const PROC_TYPES = new Set(["procedures_defnoreturn", "procedures_defreturn"]);
 const HUB_ON_IMPORT_KEY = "hub_on_import";
 
@@ -37,6 +39,8 @@ export function workspaceToPython(workspace: Workspace): string {
 
   const setupBodies: string[] = [];
   const loopBodies: string[] = [];
+  const buttonDefs: string[] = [];
+  const buttonCounts: Record<string, number> = {};
   for (const top of workspace.getTopBlocks(true)) {
     if (top.type === SETUP_HAT) {
       const next: Block | null = top.getNextBlock();
@@ -51,6 +55,16 @@ export function workspaceToPython(workspace: Workspace): string {
         const text = Array.isArray(code) ? code[0] : code;
         if (text) loopBodies.push(text);
       }
+    } else if (top.type === BUTTON_HAT) {
+      const btn = top.getFieldValue("BTN");
+      if (!VALID_BUTTONS.has(btn)) continue;
+      const child: Block | null = top.getInputTargetBlock("DO");
+      const code = child ? gen.blockToCode(child) : "";
+      const body = Array.isArray(code) ? code[0] : code;
+      const n = (buttonCounts[btn] = (buttonCounts[btn] ?? 0) + 1);
+      const suffix = n === 1 ? "" : `_${n}`;
+      const name = `_on_btn_${btn}${suffix}`;
+      buttonDefs.push(`@hub.buttons.on("${btn}")\ndef ${name}():\n${indentBody(body)}`);
     }
   }
 
@@ -72,6 +86,11 @@ export function workspaceToPython(workspace: Workspace): string {
   }
   else {
     emitDefs.push(`@on("loop")\ndef loop():\n    pass`);
+  }
+
+  if (buttonDefs.length) {
+    (gen as unknown as { definitions_: Record<string, string> }).definitions_["hub_lpf2_import"] = "import hub, lpf2";
+    for (const def of buttonDefs) emitDefs.push(def);
   }
 
   const body = emitDefs.join("\n\n\n").replace(/\s+$/, "");

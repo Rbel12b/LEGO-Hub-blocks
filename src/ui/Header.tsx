@@ -13,7 +13,7 @@ interface Props {
 
 function blocksProjectFromPython(source: string, title: string, settings: BlocksProject["settings"]): BlocksProject {
   const base = newBlocksProject(title);
-  const { setup, loop, variables } = pythonToBlocks(source);
+  const { setup, loop, buttonHats, variables } = pythonToBlocks(source);
   const topBlocks: Record<string, unknown>[] = [];
   const setupHat: Record<string, unknown> = { type: "on_setup", x: 40, y: 40 };
   if (setup) setupHat.next = { block: setup };
@@ -21,6 +21,16 @@ function blocksProjectFromPython(source: string, title: string, settings: Blocks
   const loopBlock: Record<string, unknown> = { type: "on_loop", x: 40, y: 160 };
   if (loop) loopBlock.inputs = { DO: { block: loop } };
   topBlocks.push(loopBlock);
+  buttonHats.forEach((h, i) => {
+    const b: Record<string, unknown> = {
+      type: "on_button_pressed",
+      x: 320,
+      y: 40 + i * 140,
+      fields: { BTN: h.btn },
+    };
+    if (h.chain) b.inputs = { DO: { block: h.chain } };
+    topBlocks.push(b);
+  });
   const workspace: Record<string, unknown> = {
     blocks: {
       languageVersion: 0,
@@ -58,11 +68,18 @@ interface PromptState {
   roundTripOk: boolean;
 }
 
+interface ToPythonPromptState {
+  hasRaw: boolean;
+  roundTripOk: boolean;
+  source: string;
+}
+
 export function Header({ onOpenSettings }: Props) {
   const { project, setProject } = useApp();
   const loadProject = useApp((s) => s.loadProject);
   const markSaved = useApp((s) => s.markSaved);
   const [switchPrompt, setSwitchPrompt] = useState<PromptState | null>(null);
+  const [toPythonPrompt, setToPythonPrompt] = useState<ToPythonPromptState | null>(null);
   const dark = project.type === "python";
 
   const rename = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -72,6 +89,13 @@ export function Header({ onOpenSettings }: Props) {
   const toggleType = () => {
     if (project.type === "blocks") {
       const source = useApp.getState().pythonPreview || "";
+      // Warn if the generated Python can't be parsed back to matching blocks —
+      // going back after edits will lose fidelity.
+      const check = checkTranslation(source, project.title, project.settings);
+      if (check.hasRaw || !check.roundTripOk) {
+        setToPythonPrompt({ hasRaw: check.hasRaw, roundTripOk: check.roundTripOk, source });
+        return;
+      }
       setProject({ ...newPythonProject(project.title), settings: project.settings, source });
       return;
     }
@@ -82,6 +106,12 @@ export function Header({ onOpenSettings }: Props) {
       return;
     }
     setSwitchPrompt({ hasRaw: check.hasRaw, roundTripOk: check.roundTripOk });
+  };
+
+  const confirmToPython = () => {
+    if (!toPythonPrompt) return;
+    setProject({ ...newPythonProject(project.title), settings: project.settings, source: toPythonPrompt.source });
+    setToPythonPrompt(null);
   };
 
   const confirmSwitch = (mode: "best-effort" | "discard") => {
@@ -185,6 +215,14 @@ export function Header({ onOpenSettings }: Props) {
           onBestEffort={() => confirmSwitch("best-effort")}
         />
       )}
+      {toPythonPrompt && (
+        <SwitchToPythonPrompt
+          dark={dark}
+          state={toPythonPrompt}
+          onCancel={() => setToPythonPrompt(null)}
+          onProceed={confirmToPython}
+        />
+      )}
     </header>
   );
 }
@@ -266,6 +304,84 @@ function SwitchToBlocksPrompt({ dark, state, onCancel, onDiscard, onBestEffort }
           </button>
           <button type="button" onClick={onBestEffort} style={{ ...btn, background: "#0e7490", color: "#fff" }}>
             Best effort
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ToPythonPromptProps {
+  dark: boolean;
+  state: ToPythonPromptState;
+  onCancel: () => void;
+  onProceed: () => void;
+}
+
+function SwitchToPythonPrompt({ dark, state, onCancel, onProceed }: ToPythonPromptProps) {
+  const overlay: React.CSSProperties = {
+    position: "fixed",
+    inset: 0,
+    background: dark ? "rgba(0,0,0,0.6)" : "rgba(11, 59, 72, 0.45)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+  };
+  const modal: React.CSSProperties = {
+    background: dark ? "#0b1216" : "#ffffff",
+    color: dark ? "#dff5fb" : "#0b3b48",
+    padding: 20,
+    borderRadius: 12,
+    maxWidth: 460,
+    border: dark ? "1px solid #164e63" : "1px solid #b6dbe4",
+    boxShadow: dark ? "0 10px 30px rgba(0,0,0,0.5)" : "0 10px 30px rgba(0,111,143,0.25)",
+  };
+  const btn: React.CSSProperties = {
+    padding: "6px 14px",
+    borderRadius: 6,
+    fontWeight: 600,
+    cursor: "pointer",
+    border: "1px solid #155e75",
+  };
+  const warnBg = dark ? "#3f1d1d" : "#fef2f2";
+  const warnBorder = dark ? "#7f1d1d" : "#fecaca";
+  const warnColor = dark ? "#fecaca" : "#7f1d1d";
+  return (
+    <div style={overlay} onClick={onCancel}>
+      <div style={modal} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ marginTop: 0 }}>Switch to Python?</h3>
+        <div style={{
+          background: warnBg,
+          border: `1px solid ${warnBorder}`,
+          color: warnColor,
+          padding: "8px 10px",
+          borderRadius: 6,
+          fontSize: 13,
+          lineHeight: 1.5,
+          marginBottom: 12,
+        }}>
+          <strong>Going back to Blocks won't be lossless.</strong> The generated
+          Python does not round-trip cleanly to the current blocks:
+          <ul style={{ marginTop: 6, marginBottom: 0, paddingLeft: 18 }}>
+            {state.hasRaw && (
+              <li>Contains constructs that only exist as "raw Python" blocks.</li>
+            )}
+            {!state.roundTripOk && (
+              <li>Re-parsing the Python does not reproduce the current workspace exactly.</li>
+            )}
+          </ul>
+          <p style={{ marginTop: 8, marginBottom: 0 }}>
+            If you edit the Python and later switch back, some blocks may change
+            or disappear.
+          </p>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button type="button" onClick={onCancel} style={{ ...btn, background: "transparent", color: dark ? "#dff5fb" : "#0b3b48", border: `1px solid ${dark ? "#164e63" : "#b6dbe4"}` }}>
+            Cancel
+          </button>
+          <button type="button" onClick={onProceed} style={{ ...btn, background: "#0e7490", color: "#fff" }}>
+            Switch anyway
           </button>
         </div>
       </div>
