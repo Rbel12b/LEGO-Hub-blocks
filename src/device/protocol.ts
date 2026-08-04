@@ -100,12 +100,11 @@ export class HubProtocol {
     this.onStdout = sink;
   }
 
-  async ping(timeoutMs = 3000): Promise<void> {
-    const reply = await this.send(enc.encode("#FR:PING\n"), timeoutMs);
+  async ping(timeoutMs = 3000): Promise<void> {    const reply = await this.send(enc.encode("#FR:PING\n"), timeoutMs);
     if (reply.kind !== "OK") throw new Error(reply.message || "PING failed");
   }
 
-  async runProgram(path: string, timeoutMs = 5000): Promise<void> {
+  async runProgram(path: string, timeoutMs = 3000): Promise<void> {
     const reply = await this.send(enc.encode(`#FR:RUN ${path}\n`), timeoutMs);
     if (reply.kind !== "OK") throw new Error(reply.message || "RUN failed");
   }
@@ -115,7 +114,7 @@ export class HubProtocol {
     if (reply.kind !== "OK") throw new Error(reply.message || "STOP failed");
   }
 
-  async upload(path: string, bytes: Uint8Array, timeoutMs = 60000): Promise<void> {
+  async upload(path: string, bytes: Uint8Array, timeoutMs = 3000): Promise<void> {
     const header = enc.encode(`#FR:UPLOAD ${path} ${bytes.length}\n`);
     const frame = new Uint8Array(header.length + bytes.length);
     frame.set(header, 0);
@@ -124,7 +123,7 @@ export class HubProtocol {
     if (reply.kind !== "OK") throw new Error(reply.message || "UPLOAD failed");
   }
 
-  async readFile(path: string, timeoutMs = 15000): Promise<Uint8Array> {
+  async readFile(path: string, timeoutMs = 3000): Promise<Uint8Array> {
     const reply = await this.send(enc.encode(`#FR:READ ${path}\n`), timeoutMs);
     if (reply.kind === "ERR") throw new Error(reply.message);
     if (reply.kind !== "DATA" || !reply.data) throw new Error("READ: expected DATA reply");
@@ -141,7 +140,11 @@ export class HubProtocol {
       }, timeoutMs);
       this.waiters.push(w);
     });
-    this.sending = this.sending.then(() => this.transport.write(frame)).catch(() => { /* noop */ });
+    this.sending = this.sending
+      .then(() => this.transport.write(frame))
+      .catch((e) => {
+        console.error("[protocol] transport.write failed", e);
+      });
     return p;
   }
 

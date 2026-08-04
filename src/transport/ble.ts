@@ -73,14 +73,16 @@ export class BleTransport implements Transport {
       const slice = chunk.subarray(offset, offset + this.chunkSize);
       this.writeQueue = this.writeQueue.then(async () => {
         this.writeCount++;
-        // Every 20 writes force a with-response write to flush controller queue.
-        // Copy into a fresh ArrayBuffer so the DOM type accepts it.
         const buf = new Uint8Array(slice.byteLength);
         buf.set(slice);
-        if (this.writeCount % 20 === 0) {
+        try {
+          // Use with-response for reliability. writeValueWithoutResponse can
+          // silently drop chunks on Linux/BlueZ when MTU or flow-control state
+          // isn't ideal.
           await rx.writeValueWithResponse(buf);
-        } else {
-          await rx.writeValueWithoutResponse(buf);
+        } catch (e) {
+          console.error("[ble] write failed at offset", offset, "len", slice.byteLength, e);
+          throw e;
         }
       });
     }
