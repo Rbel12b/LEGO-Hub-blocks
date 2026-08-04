@@ -44,6 +44,16 @@ describe("HubProtocol frame IO", () => {
     await transport.disconnect();
   });
 
+  it("MTU handshake returns integer", async () => {
+    const transport = new MockTransport();
+    await transport.connect();
+    const proto = new HubProtocol(transport);
+    const n = await proto.mtu();
+    expect(n).toBe(185);
+    proto.dispose();
+    await transport.disconnect();
+  });
+
   it("RUN streams stdout then OK", async () => {
     const transport = new MockTransport({ files: { "/sd/y.py": new Uint8Array([1]) }, stdout: "hello\n" });
     await transport.connect();

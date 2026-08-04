@@ -41,12 +41,23 @@ export class DeviceClient {
     await this.transport.connect();
     // Two ping attempts — cold connects sometimes drop the first frame while
     // USB CDC state settles. Both failing is still non-fatal; caller can retry.
+    let pinged = false;
     for (let i = 0; i < 2; i++) {
       try {
         await this.proto.ping(3000);
-        return;
+        pinged = true;
+        break;
       } catch {
         // fall through and retry
+      }
+    }
+    if (pinged && this.transport.setChunkSize) {
+      try {
+        const mtu = await this.proto.mtu(1500);
+        // ATT MTU includes 3 opcode/handle bytes; usable payload = mtu - 3.
+        this.transport.setChunkSize(mtu - 3);
+      } catch {
+        // Handshake optional — device without MTU support keeps default chunk.
       }
     }
   }

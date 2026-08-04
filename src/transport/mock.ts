@@ -43,7 +43,7 @@ export class MockTransport implements Transport {
   constructor(opts: MockOptions = {}) {
     this.files = { ...(opts.files ?? {}) };
     this.nextStdout = opts.stdout ?? "";
-    this.info = { name: "MockDevice" };
+    this.info = { name: "MockDevice", mtu: 185 };
   }
 
   get connected(): boolean {
@@ -117,6 +117,7 @@ export class MockTransport implements Transport {
     const cmd = sp >= 0 ? header.slice(0, sp) : header;
     const rest = sp >= 0 ? header.slice(sp + 1) : "";
     if (cmd === "PING") return this.replyOk("PING");
+    if (cmd === "MTU") return this.replyOk(`MTU=${this.info.mtu ?? 185}`);
     if (cmd === "STOP") return this.replyOk("STOP");
     if (cmd === "RUN") {
       const path = rest;

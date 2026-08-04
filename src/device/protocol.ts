@@ -104,6 +104,18 @@ export class HubProtocol {
     if (reply.kind !== "OK") throw new Error(reply.message || "PING failed");
   }
 
+  /**
+   * Ask device for its effective ATT MTU. Reply: `OK MTU=<n>`.
+   * Returns the parsed integer, or throws on ERR / malformed reply.
+   */
+  async mtu(timeoutMs = 3000): Promise<number> {
+    const reply = await this.send(enc.encode("#FR:MTU\n"), timeoutMs);
+    if (reply.kind !== "OK") throw new Error(reply.message || "MTU failed");
+    const m = /^MTU=(\d+)$/.exec(reply.message.trim());
+    if (!m) throw new Error(`MTU: bad reply "${reply.message}"`);
+    return parseInt(m[1], 10);
+  }
+
   async runProgram(path: string, timeoutMs = 3000): Promise<void> {
     const reply = await this.send(enc.encode(`#FR:RUN ${path}\n`), timeoutMs);
     if (reply.kind !== "OK") throw new Error(reply.message || "RUN failed");

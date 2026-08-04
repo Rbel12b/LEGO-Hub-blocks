@@ -36,6 +36,7 @@ Delimiter: **`0x1E`** (ASCII Record Separator, RS). Any byte on the wire outside
 \x1e STOP\n                                sets runner._stop_flag; loop exits at next tick
 \x1e READ <path>\n                         read file; reply DATA
 \x1e PING\n                                health check
+\x1e MTU\n                                 query effective ATT MTU (reply: OK MTU=<n>)
 ```
 
 Header line is UTF-8 up to `\n`. For UPLOAD, exactly `<length>` raw bytes follow the header line — the device reads them via `sys.stdin.buffer.read` without further parsing (bytes may contain any value including 0x1E).
