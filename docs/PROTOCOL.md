@@ -9,7 +9,7 @@ Two byte-pipe transports. Sub-protocol is identical on both.
 ### 1.1 BLE — Nordic UART Service (NUS)
 
 | Role | UUID |
-|------|------|
+| ------ | ------ |
 | Service | `6E400001-B5A3-F393-E0A9-E50E24DCCA9E` |
 | RX (host → device, WRITE) | `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` |
 | TX (device → host, NOTIFY) | `6E400003-B5A3-F393-E0A9-E50E24DCCA9E` |
@@ -30,7 +30,7 @@ Delimiter: **`0x1E`** (ASCII Record Separator, RS). Any byte on the wire outside
 
 ### 2.1 Web → Device
 
-```
+```text
 \x1e RUN <path>\n                          launch runner.run_program(path)
 \x1e UPLOAD <path> <length>\n<length bytes> write file (raw bytes follow header)
 \x1e STOP\n                                sets runner._stop_flag; loop exits at next tick
@@ -43,7 +43,7 @@ Header line is UTF-8 up to `\n`. For UPLOAD, exactly `<length>` raw bytes follow
 
 ### 2.2 Device → Web
 
-```
+```text
 \x1e OK <msg>\n                            control success
 \x1e ERR <msg>\n                           control error (message = traceback or reason)
 \x1e DATA <length> <msg>\n<length bytes>   binary reply (READ)
