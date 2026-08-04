@@ -5,7 +5,10 @@ export const NUS_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 export const NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // host -> device (write)
 export const NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // device -> host (notify)
 
-const DEFAULT_CHUNK = 128;
+// Safe chunk = ATT MTU (23) - 3 opcode/handle bytes. Larger writes are rejected
+// unless MTU negotiation upgrades the link; without a reliable banner from the
+// device we stick to the safe minimum. Trade-off: slower uploads.
+const DEFAULT_CHUNK = 20;
 const BANNER_PREFIX = 0x04;
 const BANNER_MTU_RE = /^MTU=(\d+)$/;
 
@@ -34,8 +37,15 @@ export class BleTransport implements Transport {
     if (!bleSupported()) {
       throw new TransportError("Web Bluetooth not supported in this browser");
     }
+    // Linux BlueZ often drops the NUS service UUID from surfaced advertisement
+    // data, so a services-only filter hides the device. Use name-based filters
+    // and let optionalServices unlock the actual GATT service on connect.
     const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [NUS_SERVICE] }],
+      filters: [
+        // { services: [NUS_SERVICE] },
+        { namePrefix: "LEGO" },
+        { namePrefix: "Hub" },
+      ],
       optionalServices: [NUS_SERVICE],
     });
     this.device = device;

@@ -39,10 +39,15 @@ export class DeviceClient {
 
   async connect(): Promise<void> {
     await this.transport.connect();
-    try {
-      await this.proto.ping(3000);
-    } catch {
-      // Firmware may not be up yet; caller can retry.
+    // Two ping attempts — cold connects sometimes drop the first frame while
+    // USB CDC state settles. Both failing is still non-fatal; caller can retry.
+    for (let i = 0; i < 2; i++) {
+      try {
+        await this.proto.ping(2000);
+        return;
+      } catch {
+        // fall through and retry
+      }
     }
   }
 
