@@ -136,6 +136,63 @@ describe("workspaceToPython", () => {
     expect(py).toMatch(/# WARN: port A used as color_sensor and distance_sensor/);
   });
 
+  it("appends hub.sleep_ms(0) to while-loop bodies with no sleep", () => {
+    const ws = makeWorkspace(
+      underLoop({
+        type: "controls_whileUntil",
+        fields: { MODE: "WHILE" },
+        inputs: {
+          BOOL: { block: { type: "logic_boolean", fields: { BOOL: "TRUE" } } },
+          DO: { block: { type: "hub_button_poll" } },
+        },
+      }),
+    );
+    const py = workspaceToPython(ws);
+    expect(py).toMatch(/while True:\s*\n\s*hub\.buttons\.poll\(\)\s*\n\s*hub\.sleep_ms\(0\)/);
+  });
+
+  it("appends hub.sleep_ms(0) to for-loop bodies with no sleep", () => {
+    const ws = makeWorkspace(
+      underLoop({
+        type: "controls_repeat_ext",
+        inputs: {
+          TIMES: { block: { type: "math_number", fields: { NUM: 5 } } },
+          DO: { block: { type: "hub_button_poll" } },
+        },
+      }),
+    );
+    const py = workspaceToPython(ws);
+    expect(py).toMatch(/for .* in range\(.*\):\s*\n\s*hub\.buttons\.poll\(\)\s*\n\s*hub\.sleep_ms\(0\)/);
+  });
+
+  it("replaces stray pass with hub.sleep_ms(0) in empty loop body", () => {
+    const ws = makeWorkspace(
+      underLoop({
+        type: "controls_repeat_ext",
+        inputs: {
+          TIMES: { block: { type: "math_number", fields: { NUM: 10 } } },
+        },
+      }),
+    );
+    const py = workspaceToPython(ws);
+    expect(py).toMatch(/for .* in range\(.*\):\s*\n\s*hub\.sleep_ms\(0\)/);
+    expect(py).not.toMatch(/range\(.*\):\s*\n\s*pass/);
+  });
+
+  it("skips extra sleep when loop body already sleeps", () => {
+    const ws = makeWorkspace(
+      underLoop({
+        type: "controls_repeat_ext",
+        inputs: {
+          TIMES: { block: { type: "math_number", fields: { NUM: 10 } } },
+          DO: { block: { type: "hub_wait", inputs: { SECONDS: { block: { type: "math_number", fields: { NUM: 1 } } } } } },
+        },
+      }),
+    );
+    const py = workspaceToPython(ws);
+    expect(py).toMatch(/for .* in range\(.*\):\s*\n\s*hub\.sleep\(1\)\s*\n(?!\s*hub\.sleep_ms)/);
+  });
+
   it("emits lpf2.color.RED for color literal block", () => {
     const ws = makeWorkspace(
       underSetup({

@@ -16,6 +16,7 @@ import { registerAdvancedHubGenerators } from "./generators/advanced_hub";
 import { registerAdvancedMotorGenerators } from "./generators/advanced_motor";
 import { registerLvglGenerators } from "./generators/lvgl";
 import { registerRawGenerators } from "./generators/raw";
+import { registerLoopSleepOverrides } from "./generators/loops";
 
 let registered = false;
 
@@ -50,6 +51,7 @@ export function registerAllBlocks(): void {
   registerAdvancedMotorGenerators(pythonGenerator);
   registerLvglGenerators(pythonGenerator);
   registerRawGenerators(pythonGenerator);
+  registerLoopSleepOverrides(pythonGenerator);
 }
 
 export { pythonGenerator };
