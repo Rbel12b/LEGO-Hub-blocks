@@ -45,8 +45,12 @@ export function workspaceToPython(workspace: Workspace): string {
       const text = Array.isArray(code) ? code[0] : code;
       if (text) setupBodies.push(text);
     } else if (top.type === LOOP_HAT) {
-      const body = gen.statementToCode(top, "DO");
-      if (body) loopBodies.push(body);
+      const child: Block | null = top.getInputTargetBlock("DO");
+      if (child) {
+        const code = gen.blockToCode(child);
+        const text = Array.isArray(code) ? code[0] : code;
+        if (text) loopBodies.push(text);
+      }
     }
   }
 
