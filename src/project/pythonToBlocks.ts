@@ -436,6 +436,7 @@ function matchDeviceStatement(line: string, portKind: Map<string, DeviceKind>): 
 
 function isPreambleBoilerplate(line: string): boolean {
   if (line === "") return true;
+  if (line === "pass") return true;
   if (/^import\s/.test(line)) return true;
   if (/^from\s/.test(line)) return true;
   if (/^@on\(/.test(line)) return true;
@@ -509,7 +510,16 @@ interface Ctx {
 }
 
 function chunkText(g: Group): string {
-  return [g.header.raw, ...g.bodyLines.map((l) => l.raw)].join("\n").replace(/\s+$/, "");
+  const raws = [g.header.raw, ...g.bodyLines.map((l) => l.raw)];
+  // Dedent by header's own indent so nested raw doesn't accumulate leading spaces.
+  const baseIndent = g.header.indent;
+  const stripped = raws.map((r) => {
+    if (baseIndent <= 0) return r;
+    let i = 0;
+    while (i < baseIndent && i < r.length && (r[i] === " " || r[i] === "\t")) i++;
+    return r.slice(i);
+  });
+  return stripped.join("\n").replace(/\s+$/, "");
 }
 
 function refsInGroup(g: Group): Set<string> {

@@ -45,8 +45,12 @@ export function workspaceToPython(workspace: Workspace): string {
       const text = Array.isArray(code) ? code[0] : code;
       if (text) setupBodies.push(text);
     } else if (top.type === LOOP_HAT) {
-      const body = gen.statementToCode(top, "DO");
-      if (body) loopBodies.push(body);
+      const child: Block | null = top.getInputTargetBlock("DO");
+      if (child) {
+        const code = gen.blockToCode(child);
+        const text = Array.isArray(code) ? code[0] : code;
+        if (text) loopBodies.push(text);
+      }
     }
   }
 
@@ -59,7 +63,7 @@ export function workspaceToPython(workspace: Workspace): string {
     emitDefs.push(`@on("setup")\ndef setup():\n${indentBody(joined)}`);
   }
   else {
-    emitDefs.push(`@on("setup")\ndef setup():`);
+    emitDefs.push(`@on("setup")\ndef setup():\n    pass`);
   }
 
   if (loopBodies.length) {
@@ -67,7 +71,7 @@ export function workspaceToPython(workspace: Workspace): string {
     emitDefs.push(`@on("loop")\ndef loop():\n${indentBody(joined)}`);
   }
   else {
-    emitDefs.push(`@on("loop")\ndef loop():\n`);
+    emitDefs.push(`@on("loop")\ndef loop():\n    pass`);
   }
 
   const body = emitDefs.join("\n\n\n").replace(/\s+$/, "");

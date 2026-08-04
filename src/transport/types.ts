@@ -17,6 +17,8 @@ export interface Transport {
   write(chunk: Uint8Array): Promise<void>;
   onData(cb: DataListener): Unsubscribe;
   onDisconnect(cb: () => void): Unsubscribe;
+  /** Optional: set max payload per write. BLE uses this after MTU handshake. */
+  setChunkSize?(bytes: number): void;
 }
 
 export class TransportError extends Error {

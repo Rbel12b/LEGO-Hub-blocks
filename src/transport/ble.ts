@@ -5,9 +5,11 @@ export const NUS_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 export const NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // host -> device (write)
 export const NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // device -> host (notify)
 
-const DEFAULT_CHUNK = 128;
-const BANNER_PREFIX = 0x04;
-const BANNER_MTU_RE = /^MTU=(\d+)$/;
+// Safe chunk = ATT MTU (23) - 3 opcode/handle bytes. Upgraded via
+// setChunkSize() after the app-level MTU handshake in HubProtocol.
+const DEFAULT_CHUNK = 20;
+const MIN_CHUNK = 20;
+const MAX_CHUNK = 512;
 
 export function bleSupported(): boolean {
   return typeof navigator !== "undefined" && "bluetooth" in navigator;
@@ -23,8 +25,13 @@ export class BleTransport implements Transport {
   private discCbs = new Set<() => void>();
   private writeQueue: Promise<void> = Promise.resolve();
   private writeCount = 0;
-  private bannerSeen = false;
   private chunkSize = DEFAULT_CHUNK;
+
+  setChunkSize(bytes: number): void {
+    if (!Number.isFinite(bytes)) return;
+    this.chunkSize = Math.max(MIN_CHUNK, Math.min(bytes | 0, MAX_CHUNK));
+    this.info = { ...this.info, mtu: this.chunkSize + 3 };
+  }
 
   get connected(): boolean {
     return this.device?.gatt?.connected === true;
@@ -34,8 +41,15 @@ export class BleTransport implements Transport {
     if (!bleSupported()) {
       throw new TransportError("Web Bluetooth not supported in this browser");
     }
+    // Linux BlueZ often drops the NUS service UUID from surfaced advertisement
+    // data, so a services-only filter hides the device. Use name-based filters
+    // and let optionalServices unlock the actual GATT service on connect.
     const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [NUS_SERVICE] }],
+      filters: [
+        // { services: [NUS_SERVICE] },
+        { namePrefix: "LEGO" },
+        { namePrefix: "Hub" },
+      ],
       optionalServices: [NUS_SERVICE],
     });
     this.device = device;
@@ -63,14 +77,16 @@ export class BleTransport implements Transport {
       const slice = chunk.subarray(offset, offset + this.chunkSize);
       this.writeQueue = this.writeQueue.then(async () => {
         this.writeCount++;
-        // Every 20 writes force a with-response write to flush controller queue.
-        // Copy into a fresh ArrayBuffer so the DOM type accepts it.
         const buf = new Uint8Array(slice.byteLength);
         buf.set(slice);
-        if (this.writeCount % 20 === 0) {
+        try {
+          // Use with-response for reliability. writeValueWithoutResponse can
+          // silently drop chunks on Linux/BlueZ when MTU or flow-control state
+          // isn't ideal.
           await rx.writeValueWithResponse(buf);
-        } else {
-          await rx.writeValueWithoutResponse(buf);
+        } catch (e) {
+          console.error("[ble] write failed at offset", offset, "len", slice.byteLength, e);
+          throw e;
         }
       });
     }
@@ -92,22 +108,6 @@ export class BleTransport implements Transport {
     const value = target.value;
     if (!value) return;
     const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-    if (!this.bannerSeen && bytes.length >= 2 && bytes[0] === BANNER_PREFIX) {
-      const nl = bytes.indexOf(0x0a);
-      if (nl > 0) {
-        const text = new TextDecoder().decode(bytes.subarray(1, nl));
-        const m = BANNER_MTU_RE.exec(text);
-        if (m) {
-          const mtu = parseInt(m[1], 10);
-          this.info = { ...this.info, mtu };
-          this.chunkSize = Math.max(20, Math.min(mtu - 3, 512));
-          this.bannerSeen = true;
-          const rest = bytes.subarray(nl + 1);
-          if (rest.length) this.emit(rest);
-          return;
-        }
-      }
-    }
     this.emit(bytes);
   };
 
@@ -129,7 +129,6 @@ export class BleTransport implements Transport {
     this.device = null;
     this.rxChar = null;
     this.txChar = null;
-    this.bannerSeen = false;
     this.chunkSize = DEFAULT_CHUNK;
   }
 }

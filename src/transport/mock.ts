@@ -6,7 +6,16 @@ import type { DataListener, Transport, TransportInfo, Unsubscribe } from "./type
  * OK/ERR/DATA replies. Programs are not actually executed — the mock replies
  * OK to RUN and streams a pre-seeded stdout (see setNextStdout) before OK.
  */
-const RS = 0x1e;
+const FRAME_MARK = new TextEncoder().encode("#FR:");
+const FRAME_FIRST = FRAME_MARK[0];
+
+function matchMark(chunk: Uint8Array, start: number): boolean {
+  if (chunk.length - start < FRAME_MARK.length) return false;
+  for (let k = 0; k < FRAME_MARK.length; k++) {
+    if (chunk[start + k] !== FRAME_MARK[k]) return false;
+  }
+  return true;
+}
 
 export interface MockOptions {
   stdout?: string;
@@ -34,7 +43,7 @@ export class MockTransport implements Transport {
   constructor(opts: MockOptions = {}) {
     this.files = { ...(opts.files ?? {}) };
     this.nextStdout = opts.stdout ?? "";
-    this.info = { name: "MockDevice" };
+    this.info = { name: "MockDevice", mtu: 185 };
   }
 
   get connected(): boolean {
@@ -93,9 +102,9 @@ export class MockTransport implements Transport {
         }
         continue;
       }
-      if (chunk[i] === RS) {
+      if (chunk[i] === FRAME_FIRST && matchMark(chunk, i)) {
         this.headerBuf = [];
-        i++;
+        i += FRAME_MARK.length;
       } else {
         // Bytes outside a frame in web→device direction shouldn't happen; drop.
         i++;
@@ -108,6 +117,7 @@ export class MockTransport implements Transport {
     const cmd = sp >= 0 ? header.slice(0, sp) : header;
     const rest = sp >= 0 ? header.slice(sp + 1) : "";
     if (cmd === "PING") return this.replyOk("PING");
+    if (cmd === "MTU") return this.replyOk(`MTU=${this.info.mtu ?? 185}`);
     if (cmd === "STOP") return this.replyOk("STOP");
     if (cmd === "RUN") {
       const path = rest;
@@ -152,17 +162,17 @@ export class MockTransport implements Transport {
   }
 
   private replyOk(msg: string): void {
-    const frame = new TextEncoder().encode(`\x1eOK ${msg}\n`);
+    const frame = new TextEncoder().encode(`#FR:OK ${msg}\n`);
     queueMicrotask(() => this.emit(frame));
   }
 
   private replyErr(msg: string): void {
-    const frame = new TextEncoder().encode(`\x1eERR ${msg}\n`);
+    const frame = new TextEncoder().encode(`#FR:ERR ${msg}\n`);
     queueMicrotask(() => this.emit(frame));
   }
 
   private replyData(bytes: Uint8Array, msg = ""): void {
-    const header = new TextEncoder().encode(`\x1eDATA ${bytes.length}${msg ? " " + msg : ""}\n`);
+    const header = new TextEncoder().encode(`#FR:DATA ${bytes.length}${msg ? " " + msg : ""}\n`);
     const frame = new Uint8Array(header.length + bytes.length);
     frame.set(header, 0);
     frame.set(bytes, header.length);

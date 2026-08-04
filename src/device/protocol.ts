@@ -6,23 +6,37 @@ import type { Transport, Unsubscribe } from "../transport/types";
  * Frame delimiter: 0x1E (ASCII Record Separator).
  *
  * Web → Device:
- *   \x1eRUN <path>\n                       - launch runner.run_program(path)
- *   \x1eUPLOAD <path> <len>\n<len bytes>  - write file
- *   \x1eSTOP\n                             - request stop (runner exits between loop iters)
- *   \x1eREAD <path>\n                      - read file, reply DATA
- *   \x1ePING\n                             - health check
+ *   #FR:RUN <path>\n                       - launch runner.run_program(path)
+ *   #FR:UPLOAD <path> <len>\n<len bytes>  - write file
+ *   #FR:STOP\n                             - request stop (runner exits between loop iters)
+ *   #FR:READ <path>\n                      - read file, reply DATA
+ *   #FR:PING\n                             - health check
  *
  * Device → Web:
- *   \x1eOK <msg>\n                         - control success
- *   \x1eERR <msg>\n                        - control error
- *   \x1eDATA <len>\n<len bytes>            - binary payload (READ)
+ *   #FR:OK <msg>\n                         - control success
+ *   #FR:ERR <msg>\n                        - control error
+ *   #FR:DATA <len>\n<len bytes>            - binary payload (READ)
  *   any other bytes                        - stdout, streamed to user
  *
  * Encoding: header line is UTF-8; payload after DATA/UPLOAD header is raw bytes
  * of exact declared length (no escaping).
  */
 
-const RS = 0x1e;
+// Frame delimiter. Multi-char printable marker chosen because some MicroPython
+// builds strip control bytes < 0x20 on the stdout side (device→web), so a
+// single-byte RS would get silently dropped.
+const FRAME_MARK = new TextEncoder().encode("#FR:");
+
+function indexOfMark(buf: Uint8Array, start: number): number {
+  const end = buf.length - FRAME_MARK.length;
+  outer: for (let i = start; i <= end; i++) {
+    for (let k = 0; k < FRAME_MARK.length; k++) {
+      if (buf[i + k] !== FRAME_MARK[k]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
 
 const enc = new TextEncoder();
 const dec = new TextDecoder("utf-8", { fatal: false });
@@ -86,23 +100,34 @@ export class HubProtocol {
     this.onStdout = sink;
   }
 
-  async ping(timeoutMs = 3000): Promise<void> {
-    const reply = await this.send(enc.encode("\x1ePING\n"), timeoutMs);
+  async ping(timeoutMs = 3000): Promise<void> {    const reply = await this.send(enc.encode("#FR:PING\n"), timeoutMs);
     if (reply.kind !== "OK") throw new Error(reply.message || "PING failed");
   }
 
-  async runProgram(path: string, timeoutMs = 5000): Promise<void> {
-    const reply = await this.send(enc.encode(`\x1eRUN ${path}\n`), timeoutMs);
+  /**
+   * Ask device for its effective ATT MTU. Reply: `OK MTU=<n>`.
+   * Returns the parsed integer, or throws on ERR / malformed reply.
+   */
+  async mtu(timeoutMs = 3000): Promise<number> {
+    const reply = await this.send(enc.encode("#FR:MTU\n"), timeoutMs);
+    if (reply.kind !== "OK") throw new Error(reply.message || "MTU failed");
+    const m = /^MTU=(\d+)$/.exec(reply.message.trim());
+    if (!m) throw new Error(`MTU: bad reply "${reply.message}"`);
+    return parseInt(m[1], 10);
+  }
+
+  async runProgram(path: string, timeoutMs = 3000): Promise<void> {
+    const reply = await this.send(enc.encode(`#FR:RUN ${path}\n`), timeoutMs);
     if (reply.kind !== "OK") throw new Error(reply.message || "RUN failed");
   }
 
   async stop(timeoutMs = 3000): Promise<void> {
-    const reply = await this.send(enc.encode("\x1eSTOP\n"), timeoutMs);
+    const reply = await this.send(enc.encode("#FR:STOP\n"), timeoutMs);
     if (reply.kind !== "OK") throw new Error(reply.message || "STOP failed");
   }
 
-  async upload(path: string, bytes: Uint8Array, timeoutMs = 60000): Promise<void> {
-    const header = enc.encode(`\x1eUPLOAD ${path} ${bytes.length}\n`);
+  async upload(path: string, bytes: Uint8Array, timeoutMs = 3000): Promise<void> {
+    const header = enc.encode(`#FR:UPLOAD ${path} ${bytes.length}\n`);
     const frame = new Uint8Array(header.length + bytes.length);
     frame.set(header, 0);
     frame.set(bytes, header.length);
@@ -110,8 +135,8 @@ export class HubProtocol {
     if (reply.kind !== "OK") throw new Error(reply.message || "UPLOAD failed");
   }
 
-  async readFile(path: string, timeoutMs = 15000): Promise<Uint8Array> {
-    const reply = await this.send(enc.encode(`\x1eREAD ${path}\n`), timeoutMs);
+  async readFile(path: string, timeoutMs = 3000): Promise<Uint8Array> {
+    const reply = await this.send(enc.encode(`#FR:READ ${path}\n`), timeoutMs);
     if (reply.kind === "ERR") throw new Error(reply.message);
     if (reply.kind !== "DATA" || !reply.data) throw new Error("READ: expected DATA reply");
     return reply.data;
@@ -127,7 +152,11 @@ export class HubProtocol {
       }, timeoutMs);
       this.waiters.push(w);
     });
-    this.sending = this.sending.then(() => this.transport.write(frame)).catch(() => { /* noop */ });
+    this.sending = this.sending
+      .then(() => this.transport.write(frame))
+      .catch((e) => {
+        console.error("[protocol] transport.write failed", e);
+      });
     return p;
   }
 
@@ -138,7 +167,17 @@ export class HubProtocol {
     w.resolve(reply);
   }
 
+  private stdoutTail = new Uint8Array(0);
+
   private onChunk(chunk: Uint8Array): void {
+    // Prepend any tail from previous chunk (potential partial FRAME_MARK prefix).
+    if (this.stdoutTail.length) {
+      const merged = new Uint8Array(this.stdoutTail.length + chunk.length);
+      merged.set(this.stdoutTail, 0);
+      merged.set(chunk, this.stdoutTail.length);
+      chunk = merged;
+      this.stdoutTail = new Uint8Array(0);
+    }
     let i = 0;
     while (i < chunk.length) {
       if (this.state.dataBuf) {
@@ -170,17 +209,25 @@ export class HubProtocol {
         }
         continue;
       }
-      const b = chunk[i];
-      if (b === RS) {
-        this.state.headerBuf = [];
-        i++;
-      } else {
-        // stdout run — accumulate until next RS.
-        let j = i;
-        while (j < chunk.length && chunk[j] !== RS) j++;
-        if (this.onStdout) this.onStdout(dec.decode(chunk.subarray(i, j)));
-        i = j;
+      // Scan for FRAME_MARK. Bytes before it are stdout.
+      const markIdx = indexOfMark(chunk, i);
+      if (markIdx < 0) {
+        // Emit stdout up to the last plausible partial-mark start.
+        const safeEnd = Math.max(i, chunk.length - (FRAME_MARK.length - 1));
+        if (safeEnd > i && this.onStdout) {
+          this.onStdout(dec.decode(chunk.subarray(i, safeEnd)));
+        }
+        // Save trailing bytes that might be a partial mark.
+        if (safeEnd < chunk.length) {
+          this.stdoutTail = new Uint8Array(chunk.subarray(safeEnd));
+        }
+        return;
       }
+      if (markIdx > i && this.onStdout) {
+        this.onStdout(dec.decode(chunk.subarray(i, markIdx)));
+      }
+      this.state.headerBuf = [];
+      i = markIdx + FRAME_MARK.length;
     }
   }
 
