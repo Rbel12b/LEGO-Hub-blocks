@@ -441,7 +441,25 @@ def set_framed_output(enabled: bool) -> None:
     ...
 
 def raw_write(buf: bytes) -> int:
-    """Write bytes to stdout bypassing the framing wrapper. Returns bytes written."""
+    """Write bytes to stdout bypassing the framing wrapper. Returns bytes written.
+
+    Flushes any pending framed output first so raw bytes never interleave
+    inside a framed payload.
+    """
+    ...
+
+def flush_output() -> None:
+    """Flush any buffered framed stdout data as a `#FR:OUT` frame."""
+    ...
+
+def set_frame_sink(cb: Optional[Callable[[bytes], None]]) -> None:
+    """Register a callback that mirrors framed and raw stdout bytes elsewhere.
+
+    Called from ``mp_hal_stdout_tx_strn`` under the GIL after every framed
+    flush and every :func:`raw_write`. Used to forward the same byte stream
+    to BLE NUS (since ``os.dupterm`` only exposes slot 0 = REPL on this port).
+    Pass ``None`` to detach. Exceptions inside the callback are swallowed.
+    """
     ...
 
 _HandlerName = Literal["setup", "loop"]

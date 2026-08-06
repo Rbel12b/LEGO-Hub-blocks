@@ -4,6 +4,7 @@ import { SENSOR_BLOCKS } from "./defs/sensor";
 import { ADVANCED_HUB_BLOCKS } from "./defs/advanced_hub";
 import { ADVANCED_MOTOR_BLOCKS } from "./defs/advanced_motor";
 import { LVGL_BLOCKS } from "./defs/lvgl";
+import { NEOPIXEL_BLOCKS } from "./defs/neopixel";
 
 interface ToolboxDef {
   advanced?: boolean;
@@ -34,6 +35,11 @@ const NUM_SHADOWS: Record<string, Record<string, number>> = {
   lvgl_rect: { X: 10, Y: 10, W: 40, H: 20 },
   lvgl_circle: { X: 40, Y: 40, D: 20 },
   lvgl_line: { X1: 0, Y1: 0, X2: 60, Y2: 40, WIDTH: 2 },
+  neopixel_init: { NUM: 8 },
+  neopixel_set_rgb: { INDEX: 0, R: 255, G: 0, B: 0 },
+  neopixel_set_hsv: { INDEX: 0, H: 0, S: 1, V: 1 },
+  neopixel_fill: { R: 255, G: 255, B: 255 },
+  neopixel_rainbow: { START: 0, STEP: 0.125, SAT: 1, VAL: 1 },
 };
 
 const STR_SHADOWS: Record<string, Record<string, string>> = {
@@ -173,6 +179,7 @@ const LOOP_BLOCKS = [
 
 export function buildToolbox(showAdvanced: boolean) {
   const screenCategory = showAdvanced ? [categoryOf(LVGL_BLOCKS, "Screen", "280", true)] : [];
+  const neopixelCategory = showAdvanced ? [categoryOf(NEOPIXEL_BLOCKS, "NeoPixel", "120", true)] : [];
   const eventContents = EVENT_BLOCKS
     .filter((d) => showAdvanced || !(d as { advanced?: boolean }).advanced)
     .map((d) => blockWithShadows(d.type));
@@ -189,6 +196,7 @@ export function buildToolbox(showAdvanced: boolean) {
       categoryOf([...MOTOR_BLOCKS, ...ADVANCED_MOTOR_BLOCKS], "Motor", "160", showAdvanced),
       categoryOf(SENSOR_BLOCKS, "Sensor", "260", showAdvanced),
       ...screenCategory,
+      ...neopixelCategory,
       { kind: "sep" },
       controlCategory,
       ...STANDARD_CATEGORIES,

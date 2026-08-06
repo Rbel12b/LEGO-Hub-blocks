@@ -82,16 +82,14 @@ export class DeviceClient {
       stderr += t;
       opts.onStderr?.(t);
     };
+    // Sinks stay installed after runProgram() resolves — that resolves on the
+    // first `OK RUN <path>` ack, but the user program keeps emitting OUT/STDERR
+    // frames until it exits. Next run/upload/dispose replaces them.
     this.proto.setStdoutSink(outSink);
     this.proto.setStderrSink(errSink);
-    try {
-      const bytes = new TextEncoder().encode(code);
-      await this.proto.upload(path, bytes, 3000);
-      await this.proto.runProgram(path, opts.timeoutMs ?? 3000);
-    } finally {
-      this.proto.setStdoutSink(null);
-      this.proto.setStderrSink(null);
-    }
+    const bytes = new TextEncoder().encode(code);
+    await this.proto.upload(path, bytes, 3000);
+    await this.proto.runProgram(path, opts.timeoutMs ?? 3000);
     return { stdout, stderr };
   }
 
@@ -110,15 +108,10 @@ export class DeviceClient {
     const errSink = opts.onStderr ? (t: string) => opts.onStderr!(t) : null;
     this.proto.setStdoutSink(outSink);
     this.proto.setStderrSink(errSink);
-    try {
-      await this.proto.upload(path, bytes, 3000);
-      opts.onProgress?.(bytes.length, bytes.length);
-      if (opts.autoRun) {
-        await this.proto.runProgram(path);
-      }
-    } finally {
-      this.proto.setStdoutSink(null);
-      this.proto.setStderrSink(null);
+    await this.proto.upload(path, bytes, 3000);
+    opts.onProgress?.(bytes.length, bytes.length);
+    if (opts.autoRun) {
+      await this.proto.runProgram(path);
     }
     return { path, length: bytes.length };
   }

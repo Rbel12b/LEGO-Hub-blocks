@@ -40,4 +40,14 @@ export function registerAdvancedHubGenerators(gen: PythonGenerator): void {
     needsLpf2(gen);
     return `hub.lcd.fill(${val(block, "COLOR", "0")})\n`;
   };
+
+  gen.forBlock["port_disable"] = (block: Block) => {
+    needsLpf2(gen);
+    return `hub.ports.${block.getFieldValue("PORT")}.disable()\n`;
+  };
+
+  gen.forBlock["port_enable"] = (block: Block) => {
+    needsLpf2(gen);
+    return `hub.ports.${block.getFieldValue("PORT")}.disable(False)\n`;
+  };
 }

@@ -384,6 +384,69 @@ function matchStatement(line: string): BlockSpec | null {
   if ((m = /^hub\.lcd\.fill\((-?\d+)\)$/.exec(line))) {
     return { type: "hub_lcd_fill", inputs: numInput("COLOR", m[1]) };
   }
+  if ((m = /^hub\.ports\.([A-D])\.disable\(\)$/.exec(line))) {
+    return { type: "port_disable", fields: { PORT: m[1] } };
+  }
+  if ((m = /^hub\.ports\.([A-D])\.disable\(False\)$/.exec(line))) {
+    return { type: "port_enable", fields: { PORT: m[1] } };
+  }
+  if (line === "leds.write()") return { type: "neopixel_write" };
+  return null;
+}
+
+function valueInput(name: string, expr: string, vars: Set<string>): Record<string, { block?: BlockSpec; shadow?: BlockSpec }> | null {
+  const b = parseExpr(expr, vars);
+  if (!b) return null;
+  const shadow: BlockSpec = { type: "math_number", fields: { NUM: "0" } };
+  if (b.type === "math_number") return { [name]: { shadow: b } };
+  return { [name]: { block: b, shadow } };
+}
+
+/**
+ * NeoPixel statement matchers that need expression parsing. Kept separate from
+ * `matchStatement` because they use `ctx.vars` via the caller.
+ */
+function matchNeopixelStatement(line: string, vars: Set<string>): BlockSpec | null {
+  let m: RegExpExecArray | null;
+  if ((m = /^leds\[(.+)\]\s*=\s*_neopixel_hsv_to_rgb\((.+)\)$/.exec(line))) {
+    const args = splitTopArgs(m[2]);
+    if (args && args.length === 3) {
+      const idx = valueInput("INDEX", m[1], vars);
+      const h = valueInput("H", args[0], vars);
+      const s = valueInput("S", args[1], vars);
+      const v = valueInput("V", args[2], vars);
+      if (idx && h && s && v) return { type: "neopixel_set_hsv", inputs: { ...idx, ...h, ...s, ...v } };
+    }
+  }
+  if ((m = /^leds\[(.+)\]\s*=\s*\((.+)\)$/.exec(line))) {
+    const args = splitTopArgs(m[2]);
+    if (args && args.length === 3) {
+      const idx = valueInput("INDEX", m[1], vars);
+      const r = valueInput("R", args[0], vars);
+      const g = valueInput("G", args[1], vars);
+      const b = valueInput("B", args[2], vars);
+      if (idx && r && g && b) return { type: "neopixel_set_rgb", inputs: { ...idx, ...r, ...g, ...b } };
+    }
+  }
+  if ((m = /^leds\.fill\(\((.+)\)\)$/.exec(line))) {
+    const args = splitTopArgs(m[1]);
+    if (args && args.length === 3) {
+      const r = valueInput("R", args[0], vars);
+      const g = valueInput("G", args[1], vars);
+      const b = valueInput("B", args[2], vars);
+      if (r && g && b) return { type: "neopixel_fill", inputs: { ...r, ...g, ...b } };
+    }
+  }
+  if ((m = /^_neopixel_draw_rainbow\(leds,\s*(.+)\)$/.exec(line))) {
+    const args = splitTopArgs(m[1]);
+    if (args && args.length === 4) {
+      const s = valueInput("START", args[0], vars);
+      const st = valueInput("STEP", args[1], vars);
+      const sa = valueInput("SAT", args[2], vars);
+      const v = valueInput("VAL", args[3], vars);
+      if (s && st && sa && v) return { type: "neopixel_rainbow", inputs: { ...s, ...st, ...sa, ...v } };
+    }
+  }
   return null;
 }
 
@@ -452,6 +515,47 @@ function isPreambleBoilerplate(line: string): boolean {
   if (/^@on\(/.test(line)) return true;
   if (line === "hub.lcd.init()") return true;
   if (line === "_scr = lv.screen_active()") return true;
+  if (line === "leds = None") return true;
+  if (line === "global leds") return true;
+  return false;
+}
+
+function bodyEmpty(g: Group): boolean {
+  return g.bodyLines.every((l) => l.text === "" || l.text.startsWith("#"));
+}
+
+/**
+ * If groups[i..] starts with `hub.ports.X.disable()` followed (optionally) by
+ * `global leds` and then `leds = NeoPixel(machine.Pin(hub.board.PORT_X_ID_N), NUM)`,
+ * consume all matched groups and return a `neopixel_init` block. Otherwise null.
+ */
+function tryConsumeNeopixelInit(groups: Group[], i: number, ctx: Ctx): { block: BlockSpec; end: number } | null {
+  const first = groups[i];
+  if (!first || !bodyEmpty(first)) return null;
+  const disM = /^hub\.ports\.([A-D])\.disable\(\)$/.exec(first.header.text);
+  if (!disM) return null;
+  const port = disM[1];
+  let j = i + 1;
+  if (j < groups.length && groups[j].header.text === "global leds" && bodyEmpty(groups[j])) j++;
+  if (j >= groups.length || !bodyEmpty(groups[j])) return null;
+  const initRe = new RegExp(`^leds\\s*=\\s*NeoPixel\\(machine\\.Pin\\(hub\\.board\\.PORT_${port}_ID_(\\d)\\)\\s*,\\s*(.+)\\)$`);
+  const initM = initRe.exec(groups[j].header.text);
+  if (!initM) return null;
+  const pin = initM[1];
+  const numInputs = valueInput("NUM", initM[2], ctx.vars);
+  if (!numInputs) return null;
+  return {
+    block: { type: "neopixel_init", fields: { PORT: port, PIN: pin, EXIT_BTN: ctx.neopixelExitBtn }, inputs: numInputs },
+    end: j + 1,
+  };
+}
+
+/** Groups whose entire header+body form NeoPixel helper defs / center hook. */
+function isNeopixelHelperGroup(g: Group): boolean {
+  const t = g.header.text;
+  if (/^def _neopixel_hsv_to_rgb\(/.test(t)) return true;
+  if (/^def _neopixel_draw_rainbow\(/.test(t)) return true;
+  if (/^def _neopixel_exit_\w+\(\s*\)\s*:$/.test(t)) return true;
   return false;
 }
 
@@ -517,6 +621,7 @@ interface Ctx {
   portKind: Map<string, DeviceKind>;
   keepRaw: Set<string>;
   vars: Set<string>;
+  neopixelExitBtn: string;
 }
 
 function chunkText(g: Group): string {
@@ -549,6 +654,8 @@ function translateGroup(g: Group, ctx: Ctx): BlockSpec | null {
   if (g.bodyLines.every((l) => l.text === "" || l.text.startsWith("#"))) {
     const block = matchStatement(t);
     if (block) return block;
+    const np = matchNeopixelStatement(t, ctx.vars);
+    if (np) return np;
   }
 
   // Compound: while
@@ -739,6 +846,24 @@ function translateGroups(groups: Group[], ctx: Ctx): BlockSpec[] {
       continue;
     }
 
+    // NeoPixel helper defs / center hook — skip whole group.
+    if (isNeopixelHelperGroup(g)) {
+      i++;
+      continue;
+    }
+
+    // NeoPixel init trio: `hub.ports.X.disable()` [+ `global leds`] +
+    // `leds = NeoPixel(machine.Pin(hub.board.PORT_X_ID_N), NUM)` — consume all
+    // three as one neopixel_init block. Bare `disable()` (no matching init)
+    // falls through to matchStatement -> port_disable.
+    const init = tryConsumeNeopixelInit(groups, i, ctx);
+    if (init) {
+      flushRaw();
+      specs.push(init.block);
+      i = init.end;
+      continue;
+    }
+
     // Device-referencing groups: participate in port-kind + keepRaw logic.
     const refs = refsInGroup(g);
     if (refs.size > 0) {
@@ -896,6 +1021,7 @@ export function pythonToBlocks(source: string): Translation {
     portKind: new Map(),
     keepRaw: new Set(),
     vars: new Set(),
+    neopixelExitBtn: "none",
   };
 
   const { groups } = groupAt(lines, 0, lines.length, 0);
@@ -920,6 +1046,31 @@ export function pythonToBlocks(source: string): Translation {
       }
     }
     strayGroups.push(g);
+  }
+
+  // Pick up exit btn from any `def _neopixel_exit_<btn>():` at module level.
+  for (const g of strayGroups) {
+    const m = /^def _neopixel_exit_(\w+)\(\s*\)\s*:$/.exec(g.header.text);
+    if (m) { ctx.neopixelExitBtn = m[1]; break; }
+  }
+  // If pythonGen absorbed the auto-hook into a user hat, strip the trailing
+  // `hub.ports.X.disable(False)` re-enable lines plus final `hub.exit()` so we
+  // don't materialize spurious `port_enable`/`hub_quit` blocks.
+  const REENABLE_RE = /^hub\.ports\.[A-D]\.disable\(False\)$/;
+  for (const h of buttonHatGroups) {
+    if (h.btn !== ctx.neopixelExitBtn) continue;
+    let k = h.body.length - 1;
+    // Trailing hub.exit()
+    while (k >= 0 && (h.body[k].text === "" || h.body[k].text.startsWith("#"))) k--;
+    if (k < 0 || h.body[k].text !== "hub.exit()") continue;
+    h.body.splice(k, 1);
+    // Preceding re-enable lines
+    for (let j = k - 1; j >= 0; j--) {
+      const line = h.body[j];
+      if (line.text === "" || line.text.startsWith("#")) continue;
+      if (REENABLE_RE.test(line.text)) { h.body.splice(j, 1); continue; }
+      break;
+    }
   }
 
   const btnHatBodyGroups: Group[][] = buttonHatGroups.map((h) => bodyToGroups(h.body));
