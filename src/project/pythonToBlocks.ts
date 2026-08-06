@@ -1054,13 +1054,21 @@ export function pythonToBlocks(source: string): Translation {
     if (m) { ctx.neopixelExitBtn = m[1]; break; }
   }
   // If pythonGen absorbed the auto-hook into a user hat, strip the trailing
-  // `hub.exit()` so we don't materialize a spurious `hub_quit` block.
+  // `hub.ports.X.disable(False)` re-enable lines plus final `hub.exit()` so we
+  // don't materialize spurious `port_enable`/`hub_quit` blocks.
+  const REENABLE_RE = /^hub\.ports\.[A-D]\.disable\(False\)$/;
   for (const h of buttonHatGroups) {
     if (h.btn !== ctx.neopixelExitBtn) continue;
-    for (let k = h.body.length - 1; k >= 0; k--) {
-      const line = h.body[k];
+    let k = h.body.length - 1;
+    // Trailing hub.exit()
+    while (k >= 0 && (h.body[k].text === "" || h.body[k].text.startsWith("#"))) k--;
+    if (k < 0 || h.body[k].text !== "hub.exit()") continue;
+    h.body.splice(k, 1);
+    // Preceding re-enable lines
+    for (let j = k - 1; j >= 0; j--) {
+      const line = h.body[j];
       if (line.text === "" || line.text.startsWith("#")) continue;
-      if (line.text === "hub.exit()") h.body.splice(k, 1);
+      if (REENABLE_RE.test(line.text)) { h.body.splice(j, 1); continue; }
       break;
     }
   }

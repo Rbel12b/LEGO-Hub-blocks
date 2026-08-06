@@ -67,24 +67,40 @@ export function getNeopixelExitButtons(): string[] {
 export function absorbNeopixelExit(gen: PythonGenerator, btn: string): string {
   const d = (gen as unknown as { definitions_: Record<string, string> }).definitions_;
   delete d[NEOPIXEL_HOOK_KEY(btn)];
-  return `hub.exit()\n`;
+  const reenable = [...neopixelPorts].map((p) => `hub.ports.${p}.disable(False)\n`).join("");
+  return reenable + `hub.exit()\n`;
 }
 
 /**
- * Register a NeoPixel-owned port and (optionally) an exit-button hook that
- * calls `hub.exit()` on press. `exitBtn === "none"` skips hook emission.
+ * Rebuild every `_neopixel_exit_<btn>` def so the port re-enable list stays in
+ * sync when more init blocks register. Body: `hub.ports.X.disable(False)` for
+ * every owned port, then `hub.exit()`.
+ */
+function emitAllHooks(gen: PythonGenerator): void {
+  const d = (gen as unknown as { definitions_: Record<string, string> }).definitions_;
+  const bodyLines = [
+    ...[...neopixelPorts].map((p) => `    hub.ports.${p}.disable(False)`),
+    `    hub.exit()`,
+  ].join("\n");
+  for (const btn of neopixelExitButtons) {
+    d[NEOPIXEL_HOOK_KEY(btn)] = [
+      `@hub.buttons.on("${btn}")`,
+      `def _neopixel_exit_${btn}():`,
+      bodyLines,
+    ].join("\n");
+  }
+}
+
+/**
+ * Register a NeoPixel-owned port and an exit-button hook that re-enables all
+ * NeoPixel ports then calls `hub.exit()` on press.
  */
 export function registerNeopixelReenable(gen: PythonGenerator, port: Port, exitBtn: string): void {
   needsLpf2(gen);
   neopixelPorts.add(port);
-  if (!AUTO_NEOPIXEL_HOOK || exitBtn === "none") return;
+  if (!AUTO_NEOPIXEL_HOOK) return;
   neopixelExitButtons.add(exitBtn);
-  const def = [
-    `@hub.buttons.on("${exitBtn}")`,
-    `def _neopixel_exit_${exitBtn}():`,
-    `    hub.exit()`,
-  ].join("\n");
-  (gen as unknown as { definitions_: Record<string, string> }).definitions_[NEOPIXEL_HOOK_KEY(exitBtn)] = def;
+  emitAllHooks(gen);
 }
 
 export function needsLpf2(gen: PythonGenerator): void {
