@@ -6,6 +6,7 @@ export type ConsoleSink = (text: string) => void;
 
 export interface RunOptions {
   onStdout?: ConsoleSink;
+  onStderr?: ConsoleSink;
   timeoutMs?: number;
 }
 
@@ -14,6 +15,7 @@ export interface UploadRunOptions {
   autoRun?: boolean;
   onProgress?: (sent: number, total: number) => void;
   onStdout?: ConsoleSink;
+  onStderr?: ConsoleSink;
 }
 
 export interface UploadResult {
@@ -71,19 +73,26 @@ export class DeviceClient {
   async run(code: string, opts: RunOptions = {}): Promise<{ stdout: string; stderr: string }> {
     const path = `/sd/${TMP_RUN_NAME}`;
     let stdout = "";
-    const sink = (t: string) => {
+    let stderr = "";
+    const outSink = (t: string) => {
       stdout += t;
       opts.onStdout?.(t);
     };
-    this.proto.setStdoutSink(sink);
+    const errSink = (t: string) => {
+      stderr += t;
+      opts.onStderr?.(t);
+    };
+    this.proto.setStdoutSink(outSink);
+    this.proto.setStderrSink(errSink);
     try {
       const bytes = new TextEncoder().encode(code);
       await this.proto.upload(path, bytes, 3000);
       await this.proto.runProgram(path, opts.timeoutMs ?? 3000);
     } finally {
       this.proto.setStdoutSink(null);
+      this.proto.setStderrSink(null);
     }
-    return { stdout, stderr: "" };
+    return { stdout, stderr };
   }
 
   async stop(): Promise<void> {
@@ -97,8 +106,10 @@ export class DeviceClient {
 
   async upload(path: string, bytes: Uint8Array, opts: UploadRunOptions): Promise<UploadResult> {
     validatePath(path, opts.policy);
-    const sink = opts.onStdout ? (t: string) => opts.onStdout!(t) : null;
-    this.proto.setStdoutSink(sink);
+    const outSink = opts.onStdout ? (t: string) => opts.onStdout!(t) : null;
+    const errSink = opts.onStderr ? (t: string) => opts.onStderr!(t) : null;
+    this.proto.setStdoutSink(outSink);
+    this.proto.setStderrSink(errSink);
     try {
       await this.proto.upload(path, bytes, 3000);
       opts.onProgress?.(bytes.length, bytes.length);
@@ -107,6 +118,7 @@ export class DeviceClient {
       }
     } finally {
       this.proto.setStdoutSink(null);
+      this.proto.setStderrSink(null);
     }
     return { path, length: bytes.length };
   }

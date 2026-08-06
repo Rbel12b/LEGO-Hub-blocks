@@ -16,7 +16,9 @@ import type { Transport, Unsubscribe } from "../transport/types";
  *   #FR:OK <msg>\n                         - control success
  *   #FR:ERR <msg>\n                        - control error
  *   #FR:DATA <len>\n<len bytes>            - binary payload (READ)
- *   any other bytes                        - stdout, streamed to user
+ *   #FR:OUT <len>\n<len bytes>             - stdout chunk (unsolicited, from sys.stdout)
+ *   #FR:STDERR <len>\n<len bytes>          - stderr chunk (unsolicited, from sys.stderr)
+ *   any other bytes                        - stdout fallback (pre-redirect / raw REPL)
  *
  * Encoding: header line is UTF-8; payload after DATA/UPLOAD header is raw bytes
  * of exact declared length (no escaping).
@@ -42,6 +44,7 @@ const enc = new TextEncoder();
 const dec = new TextDecoder("utf-8", { fatal: false });
 
 export type StdoutSink = (chunk: string) => void;
+export type StderrSink = (chunk: string) => void;
 
 interface Waiter {
   resolve: (reply: FrameReply) => void;
@@ -58,9 +61,9 @@ export interface FrameReply {
 interface ParseState {
   /** null = scanning stdout; else = collected header bytes after RS (excluding RS itself) */
   headerBuf: number[] | null;
-  /** if reading DATA payload, bytes remaining */
+  /** if reading DATA/OUT/STDERR payload, bytes remaining */
   dataRemaining: number;
-  dataKind: "DATA" | null;
+  dataKind: "DATA" | "OUT" | "STDERR" | null;
   dataMessage: string;
   dataBuf: Uint8Array | null;
   dataOffset: number;
@@ -70,6 +73,7 @@ export class HubProtocol {
   private transport: Transport;
   private unsub: Unsubscribe | null = null;
   private onStdout: StdoutSink | null = null;
+  private onStderr: StderrSink | null = null;
   private waiters: Waiter[] = [];
   private state: ParseState = {
     headerBuf: null,
@@ -98,6 +102,10 @@ export class HubProtocol {
 
   setStdoutSink(sink: StdoutSink | null): void {
     this.onStdout = sink;
+  }
+
+  setStderrSink(sink: StderrSink | null): void {
+    this.onStderr = sink;
   }
 
   async ping(timeoutMs = 3000): Promise<void> {    const reply = await this.send(enc.encode("#FR:PING\n"), timeoutMs);
@@ -190,11 +198,18 @@ export class HubProtocol {
         if (this.state.dataRemaining === 0) {
           const buf = this.state.dataBuf;
           const msg = this.state.dataMessage;
+          const kind = this.state.dataKind;
           this.state.dataBuf = null;
           this.state.dataOffset = 0;
           this.state.dataMessage = "";
           this.state.dataKind = null;
-          this.resolveNext({ kind: "DATA", message: msg, data: buf });
+          if (kind === "OUT") {
+            this.onStdout?.(dec.decode(buf));
+          } else if (kind === "STDERR") {
+            this.onStderr?.(dec.decode(buf));
+          } else {
+            this.resolveNext({ kind: "DATA", message: msg, data: buf });
+          }
         }
         continue;
       }
@@ -240,24 +255,26 @@ export class HubProtocol {
       this.resolveNext({ kind: "OK", message: rest });
     } else if (kind === "ERR") {
       this.resolveNext({ kind: "ERR", message: rest });
-    } else if (kind === "DATA") {
+    } else if (kind === "DATA" || kind === "OUT" || kind === "STDERR") {
       const spIdx = rest.indexOf(" ");
       const lenStr = spIdx >= 0 ? rest.slice(0, spIdx) : rest;
       const msg = spIdx >= 0 ? rest.slice(spIdx + 1) : "";
       const len = parseInt(lenStr, 10);
       if (Number.isNaN(len) || len < 0) {
-        this.resolveNext({ kind: "ERR", message: "bad DATA header" });
+        if (kind === "DATA") this.resolveNext({ kind: "ERR", message: "bad DATA header" });
         return;
       }
       if (len === 0) {
-        this.resolveNext({ kind: "DATA", message: msg, data: new Uint8Array(0) });
+        if (kind === "DATA") {
+          this.resolveNext({ kind: "DATA", message: msg, data: new Uint8Array(0) });
+        }
         return;
       }
       this.state.dataBuf = new Uint8Array(len);
       this.state.dataRemaining = len;
       this.state.dataOffset = 0;
       this.state.dataMessage = msg;
-      this.state.dataKind = "DATA";
+      this.state.dataKind = kind;
     } else {
       // Unknown frame — drop, don't resolve.
     }

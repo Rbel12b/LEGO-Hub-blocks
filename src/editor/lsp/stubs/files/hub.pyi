@@ -265,6 +265,83 @@ class _buttons_module:
         """Reinstall a registry captured by :meth:`_snapshot`."""
         ...
 
+class _i2c:
+    """Shared internal I2C bus (``Wire1`` on the C++ side).
+
+    Same bus as the PCA9685, SC16IS750 (I2C variant), the BNO085 IMU
+    and the on-board Grove connector. Public API mirrors
+    :class:`machine.I2C` (hardware variant) one-to-one — anything
+    written for ``machine.I2C`` works unchanged.
+
+    The Arduino-ESP32 ``TwoWire`` driver serialises individual
+    transactions with a per-bus mutex, so calls from Python and from
+    the C++ hub tick are safe to interleave at transaction
+    granularity. A second recursive mutex on the Python side keeps
+    compound ops (``readfrom_mem`` = write memaddr + repeated-start
+    read) from being split by another Python caller.
+
+    Do not instantiate — use the pre-built ``hub.i2c`` singleton.
+    """
+
+    def init(
+        self,
+        *,
+        scl: Optional[int] = None,
+        sda: Optional[int] = None,
+        freq: int = -1,
+    ) -> None:
+        """Re-configure the bus.
+
+        ``scl`` / ``sda`` are fixed to the hub's internal I2C pins;
+        passing a different value raises :class:`ValueError`. ``freq``
+        (Hz) is applied via ``TwoWire::setClock``.
+        """
+        ...
+
+    def scan(self) -> list[int]:
+        """Return the 7-bit addresses that responded to a probe (``0x08``..``0x77``)."""
+        ...
+
+    def readfrom(self, addr: int, nbytes: int, stop: bool = True) -> bytes:
+        """Read ``nbytes`` from ``addr``. Raises ``OSError(ENODEV)`` on NACK."""
+        ...
+
+    def readfrom_into(self, addr: int, buf: bytearray, stop: bool = True) -> None:
+        """Read ``len(buf)`` bytes from ``addr`` into ``buf``."""
+        ...
+
+    def writeto(self, addr: int, buf: bytes, stop: bool = True) -> int:
+        """Write ``buf`` to ``addr``. Returns the number of bytes written."""
+        ...
+
+    def writevto(
+        self, addr: int, vector: Iterable[bytes], stop: bool = True
+    ) -> int:
+        """Write a scatter/gather ``vector`` of buffers in one transaction."""
+        ...
+
+    def readfrom_mem(
+        self, addr: int, memaddr: int, nbytes: int, *, addrsize: int = 8
+    ) -> bytes:
+        """Read ``nbytes`` from register ``memaddr`` on ``addr``.
+
+        ``addrsize`` is 8 or 16 (big-endian on the wire). Uses a
+        repeated-start between the memaddr write and the read.
+        """
+        ...
+
+    def readfrom_mem_into(
+        self, addr: int, memaddr: int, buf: bytearray, *, addrsize: int = 8
+    ) -> None:
+        """As :meth:`readfrom_mem` but into a pre-allocated ``buf``."""
+        ...
+
+    def writeto_mem(
+        self, addr: int, memaddr: int, buf: bytes, *, addrsize: int = 8
+    ) -> None:
+        """Write ``buf`` to register ``memaddr`` on ``addr``."""
+        ...
+
 class _board_module:
     """Board-specific pin/config constants (SD card etc.)."""
     SD_MODE: int
@@ -346,9 +423,25 @@ lcd: _lcd_module
 """LCD + LVGL control (see :class:`_lcd_module`)."""
 buttons: _buttons_module
 """Button API (see :class:`_buttons_module`)."""
+i2c: _i2c
+"""Shared internal I2C bus (Grove + on-board devices). See :class:`_i2c`."""
 
 def powerOff() -> NoReturn:
     """Turn the hub off immediately. Does not return."""
+    ...
+
+def set_framed_output(enabled: bool) -> None:
+    """Enable/disable C-level stdout framing (`#FR:OUT <len>\\n<bytes>`).
+
+    When enabled, every ``mp_hal_stdout_tx_strn`` call is wrapped so the host
+    protocol parser can separate program output from binary frames. Used by
+    the HubProtocol layer since ``sys.stdout`` is an immutable dummy in this
+    build and can't be replaced from Python.
+    """
+    ...
+
+def raw_write(buf: bytes) -> int:
+    """Write bytes to stdout bypassing the framing wrapper. Returns bytes written."""
     ...
 
 _HandlerName = Literal["setup", "loop"]

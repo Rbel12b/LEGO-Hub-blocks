@@ -65,4 +65,30 @@ describe("HubProtocol frame IO", () => {
     proto.dispose();
     await transport.disconnect();
   });
+
+  it("parses framed OUT / STDERR chunks", async () => {
+    const transport = new MockTransport();
+    await transport.connect();
+    const proto = new HubProtocol(transport);
+    let out = "";
+    let err = "";
+    proto.setStdoutSink((t) => { out += t; });
+    proto.setStderrSink((t) => { err += t; });
+    const enc = new TextEncoder();
+    const payload = enc.encode("hi #FR: bye\n");
+    const outFrame = new Uint8Array(enc.encode(`#FR:OUT ${payload.length}\n`).length + payload.length);
+    outFrame.set(enc.encode(`#FR:OUT ${payload.length}\n`), 0);
+    outFrame.set(payload, enc.encode(`#FR:OUT ${payload.length}\n`).length);
+    // Deliver directly through the transport's data callbacks (bypass write path).
+    (transport as unknown as { dataCbs: Set<(b: Uint8Array) => void> }).dataCbs.forEach((cb) => cb(outFrame));
+    const errBytes = enc.encode("Traceback\n");
+    const errFrame = new Uint8Array(enc.encode(`#FR:STDERR ${errBytes.length}\n`).length + errBytes.length);
+    errFrame.set(enc.encode(`#FR:STDERR ${errBytes.length}\n`), 0);
+    errFrame.set(errBytes, enc.encode(`#FR:STDERR ${errBytes.length}\n`).length);
+    (transport as unknown as { dataCbs: Set<(b: Uint8Array) => void> }).dataCbs.forEach((cb) => cb(errFrame));
+    expect(out).toBe("hi #FR: bye\n");
+    expect(err).toBe("Traceback\n");
+    proto.dispose();
+    await transport.disconnect();
+  });
 });
