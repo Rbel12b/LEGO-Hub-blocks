@@ -430,6 +430,20 @@ def powerOff() -> NoReturn:
     """Turn the hub off immediately. Does not return."""
     ...
 
+def set_framed_output(enabled: bool) -> None:
+    """Enable/disable C-level stdout framing (`#FR:OUT <len>\\n<bytes>`).
+
+    When enabled, every ``mp_hal_stdout_tx_strn`` call is wrapped so the host
+    protocol parser can separate program output from binary frames. Used by
+    the HubProtocol layer since ``sys.stdout`` is an immutable dummy in this
+    build and can't be replaced from Python.
+    """
+    ...
+
+def raw_write(buf: bytes) -> int:
+    """Write bytes to stdout bypassing the framing wrapper. Returns bytes written."""
+    ...
+
 _HandlerName = Literal["setup", "loop"]
 _Handler = Callable[[], None]
 
