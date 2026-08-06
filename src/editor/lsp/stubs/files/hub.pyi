@@ -294,6 +294,40 @@ class _board_module:
     SD_D3: int
     """SDMMC data-line 3 (4-bit mode)."""
 
+    PORT_A_ID_1: int
+    """Port A ID1 pin (LPF2 identification / analog-ID line 1)."""
+    PORT_A_ID_2: int
+    """Port A ID2 pin (LPF2 identification / analog-ID line 2)."""
+    PORT_B_ID_1: int
+    """Port B ID1 pin."""
+    PORT_B_ID_2: int
+    """Port B ID2 pin."""
+    PORT_C_ID_1: int
+    """Port C ID1 pin."""
+    PORT_C_ID_2: int
+    """Port C ID2 pin."""
+    PORT_D_ID_1: int
+    """Port D ID1 pin."""
+    PORT_D_ID_2: int
+    """Port D ID2 pin."""
+
+    PORT_A_PWM_1: int
+    """Port A H-bridge PWM channel 1 (M1)."""
+    PORT_A_PWM_2: int
+    """Port A H-bridge PWM channel 2 (M2)."""
+    PORT_B_PWM_1: int
+    """Port B H-bridge PWM channel 1."""
+    PORT_B_PWM_2: int
+    """Port B H-bridge PWM channel 2."""
+    PORT_C_PWM_1: int
+    """Port C H-bridge PWM channel 1."""
+    PORT_C_PWM_2: int
+    """Port C H-bridge PWM channel 2."""
+    PORT_D_PWM_1: int
+    """Port D H-bridge PWM channel 1."""
+    PORT_D_PWM_2: int
+    """Port D H-bridge PWM channel 2."""
+
 ports: _ports_module
 """Hub ports (see :class:`_ports_module`)."""
 log: _log_module
