@@ -9,6 +9,7 @@ const LCD_BACKLIGHT = [
   ["on", "on"],
   ["off", "off"],
 ] as const;
+const PORT_DROPDOWN = [["A", "A"], ["B", "B"], ["C", "C"], ["D", "D"]] as const;
 
 /** All tagged advanced:true — revealed by the header Advanced toggle. */
 export const ADVANCED_HUB_BLOCKS = [
@@ -62,6 +63,26 @@ export const ADVANCED_HUB_BLOCKS = [
     colour: 210,
     inputsInline: true,
     advanced: true,
+  },
+  {
+    type: "port_disable",
+    message0: "disable port %1",
+    args0: [{ type: "field_dropdown", name: "PORT", options: [...PORT_DROPDOWN] }],
+    previousStatement: null,
+    nextStatement: null,
+    colour: 210,
+    advanced: true,
+    tooltip: "Disable the port's LPF2 driver so its pins can be repurposed (e.g. NeoPixel).",
+  },
+  {
+    type: "port_enable",
+    message0: "enable port %1",
+    args0: [{ type: "field_dropdown", name: "PORT", options: [...PORT_DROPDOWN] }],
+    previousStatement: null,
+    nextStatement: null,
+    colour: 210,
+    advanced: true,
+    tooltip: "Re-enable the port's LPF2 driver after a previous disable().",
   },
   {
     type: "hub_lcd_fill",

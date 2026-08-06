@@ -33,9 +33,43 @@ const KEY_LVGL_IMPORT = "lvgl_import";
 const KEY_TIME_IMPORT = "time_import";
 
 const state = new Map<Port, Registration>();
+const neopixelPorts = new Set<Port>();
 
 export function resetSetup(): void {
   state.clear();
+  neopixelPorts.clear();
+}
+
+const KEY_NEOPIXEL_CENTER = "neopixel_center_reenable";
+
+/** Ports currently owned by NeoPixel init blocks (module-scoped, reset per run). */
+export function getNeopixelPorts(): Port[] {
+  return [...neopixelPorts];
+}
+
+/**
+ * Called when pythonGen emits a user-defined center button hat: fold the
+ * NeoPixel port re-enable lines into that hat's body and drop the standalone
+ * `_neopixel_reenable` def so only one `@hub.buttons.on("center")` decorator
+ * exists in the output.
+ */
+export function absorbNeopixelReenable(gen: PythonGenerator): string {
+  const d = (gen as unknown as { definitions_: Record<string, string> }).definitions_;
+  delete d[KEY_NEOPIXEL_CENTER];
+  return [...neopixelPorts].map((p) => `hub.ports.${p}.disable(False)\n`).join("");
+}
+
+/**
+ * Register a NeoPixel-owned port so a center-button hook re-enables all such
+ * ports on button press. Idempotent per port; the hook body is rebuilt each
+ * call so multiple init blocks converge on one handler.
+ */
+export function registerNeopixelReenable(gen: PythonGenerator, port: Port): void {
+  needsLpf2(gen);
+  neopixelPorts.add(port);
+  const lines: string[] = [`@hub.buttons.on("center")`, `def _neopixel_reenable():`];
+  for (const p of neopixelPorts) lines.push(`    hub.ports.${p}.disable(False)`);
+  (gen as unknown as { definitions_: Record<string, string> }).definitions_[KEY_NEOPIXEL_CENTER] = lines.join("\n");
 }
 
 export function needsLpf2(gen: PythonGenerator): void {
