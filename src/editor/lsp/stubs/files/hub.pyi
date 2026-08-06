@@ -11,7 +11,7 @@ from lpf2.local import port as _local_port
 from lpf2.devices import hub_led as _hub_led
 from lpf2.devices import accelerometer as _accelerometer
 from lpf2.devices import gyroscope as _gyroscope
-from typing import NoReturn
+from typing import Iterable, NoReturn, Optional, Union
 
 class _vec3:
     """3-component float vector used for IMU acceleration / gyro samples."""
