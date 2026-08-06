@@ -1,7 +1,7 @@
 import type { Block, Workspace } from "blockly";
 import { pythonGenerator } from "blockly/python";
 import { registerAllBlocks } from "../blocks";
-import { resetSetup, getNeopixelPorts, absorbNeopixelReenable } from "../blocks/setup";
+import { resetSetup, getNeopixelExitButtons, absorbNeopixelExit } from "../blocks/setup";
 
 registerAllBlocks();
 
@@ -64,8 +64,8 @@ export function workspaceToPython(workspace: Workspace): string {
       const n = (buttonCounts[btn] = (buttonCounts[btn] ?? 0) + 1);
       const suffix = n === 1 ? "" : `_${n}`;
       const name = `_on_btn_${btn}${suffix}`;
-      if (btn === "center" && n === 1 && getNeopixelPorts().length > 0) {
-        body = absorbNeopixelReenable(gen) + body;
+      if (n === 1 && getNeopixelExitButtons().includes(btn)) {
+        body = body + absorbNeopixelExit(gen, btn);
       }
       buttonDefs.push(`@hub.buttons.on("${btn}")\ndef ${name}():\n${indentBody(body)}`);
     }

@@ -34,42 +34,57 @@ const KEY_TIME_IMPORT = "time_import";
 
 const state = new Map<Port, Registration>();
 const neopixelPorts = new Set<Port>();
+const neopixelExitButtons = new Set<string>();
 
 export function resetSetup(): void {
   state.clear();
   neopixelPorts.clear();
+  neopixelExitButtons.clear();
 }
 
-const KEY_NEOPIXEL_CENTER = "neopixel_center_reenable";
+/**
+ * Kill switch — set false to skip all NeoPixel auto exit-button hooks
+ * regardless of block-level `EXIT_BTN` dropdown values.
+ */
+export const AUTO_NEOPIXEL_HOOK = true;
 
-/** Ports currently owned by NeoPixel init blocks (module-scoped, reset per run). */
+const NEOPIXEL_HOOK_KEY = (btn: string) => `neopixel_exit_${btn}`;
+
 export function getNeopixelPorts(): Port[] {
   return [...neopixelPorts];
 }
 
-/**
- * Called when pythonGen emits a user-defined center button hat: fold the
- * NeoPixel port re-enable lines into that hat's body and drop the standalone
- * `_neopixel_reenable` def so only one `@hub.buttons.on("center")` decorator
- * exists in the output.
- */
-export function absorbNeopixelReenable(gen: PythonGenerator): string {
-  const d = (gen as unknown as { definitions_: Record<string, string> }).definitions_;
-  delete d[KEY_NEOPIXEL_CENTER];
-  return [...neopixelPorts].map((p) => `hub.ports.${p}.disable(False)\n`).join("");
+export function getNeopixelExitButtons(): string[] {
+  return [...neopixelExitButtons];
 }
 
 /**
- * Register a NeoPixel-owned port so a center-button hook re-enables all such
- * ports on button press. Idempotent per port; the hook body is rebuilt each
- * call so multiple init blocks converge on one handler.
+ * Called from pythonGen when it emits a user-defined button hat for `btn` and
+ * that btn is in `getNeopixelExitButtons()`. Deletes the standalone
+ * `_neopixel_exit_<btn>` def and returns the line to append to the user body,
+ * so only one `@hub.buttons.on("<btn>")` ends up in the output.
  */
-export function registerNeopixelReenable(gen: PythonGenerator, port: Port): void {
+export function absorbNeopixelExit(gen: PythonGenerator, btn: string): string {
+  const d = (gen as unknown as { definitions_: Record<string, string> }).definitions_;
+  delete d[NEOPIXEL_HOOK_KEY(btn)];
+  return `hub.exit()\n`;
+}
+
+/**
+ * Register a NeoPixel-owned port and (optionally) an exit-button hook that
+ * calls `hub.exit()` on press. `exitBtn === "none"` skips hook emission.
+ */
+export function registerNeopixelReenable(gen: PythonGenerator, port: Port, exitBtn: string): void {
   needsLpf2(gen);
   neopixelPorts.add(port);
-  const lines: string[] = [`@hub.buttons.on("center")`, `def _neopixel_reenable():`];
-  for (const p of neopixelPorts) lines.push(`    hub.ports.${p}.disable(False)`);
-  (gen as unknown as { definitions_: Record<string, string> }).definitions_[KEY_NEOPIXEL_CENTER] = lines.join("\n");
+  if (!AUTO_NEOPIXEL_HOOK || exitBtn === "none") return;
+  neopixelExitButtons.add(exitBtn);
+  const def = [
+    `@hub.buttons.on("${exitBtn}")`,
+    `def _neopixel_exit_${exitBtn}():`,
+    `    hub.exit()`,
+  ].join("\n");
+  (gen as unknown as { definitions_: Record<string, string> }).definitions_[NEOPIXEL_HOOK_KEY(exitBtn)] = def;
 }
 
 export function needsLpf2(gen: PythonGenerator): void {

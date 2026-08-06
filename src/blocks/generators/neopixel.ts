@@ -63,7 +63,8 @@ export function registerNeopixelGenerators(gen: PythonGenerator): void {
     const port = block.getFieldValue("PORT") as Port;
     const pin = block.getFieldValue("PIN");
     const num = val(block, "NUM", "8");
-    registerNeopixelReenable(gen, port);
+    const exitBtn = block.getFieldValue("EXIT_BTN") || "center";
+    registerNeopixelReenable(gen, port, exitBtn);
     return [
       `hub.ports.${port}.disable()`,
       `global leds`,

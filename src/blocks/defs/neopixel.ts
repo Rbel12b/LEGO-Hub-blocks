@@ -1,6 +1,13 @@
 import { PORT_DROPDOWN } from "./hub";
 
 const PIN_DROPDOWN = [["1", "1"], ["2", "2"]] as const;
+const EXIT_BTN_OPTIONS = [
+  ["center", "center"],
+  ["up", "up"],
+  ["down", "down"],
+  ["left", "left"],
+  ["right", "right"],
+] as const;
 
 /**
  * NeoPixel (WS2812) blocks. Single global strip `leds`. Init disables the
@@ -9,18 +16,19 @@ const PIN_DROPDOWN = [["1", "1"], ["2", "2"]] as const;
 export const NEOPIXEL_BLOCKS = [
   {
     type: "neopixel_init",
-    message0: "init NeoPixels on port %1 pin %2 count %3",
+    message0: "init NeoPixels on port %1 pin %2 count %3 exit on %4",
     args0: [
       { type: "field_dropdown", name: "PORT", options: [...PORT_DROPDOWN] },
       { type: "field_dropdown", name: "PIN", options: [...PIN_DROPDOWN] },
       { type: "input_value", name: "NUM", check: "Number" },
+      { type: "field_dropdown", name: "EXIT_BTN", options: [...EXIT_BTN_OPTIONS] },
     ],
     previousStatement: null,
     nextStatement: null,
     colour: 120,
     advanced: true,
     inputsInline: true,
-    tooltip: "Disables the port, then creates a NeoPixel strip on that port's pin. Place in setup.",
+    tooltip: "Disables the port, creates a NeoPixel strip, and (optionally) hooks the chosen button to hub.exit(). Place in setup.",
   },
   {
     type: "neopixel_set_rgb",
