@@ -47,10 +47,14 @@ Header line is UTF-8 up to `\n`. For UPLOAD, exactly `<length>` raw bytes follow
 \x1e OK <msg>\n                            control success
 \x1e ERR <msg>\n                           control error (message = traceback or reason)
 \x1e DATA <length> <msg>\n<length bytes>   binary reply (READ)
-<other bytes>                              stdout — streamed to console
+\x1e OUT <length>\n<length bytes>          stdout chunk (unsolicited, from sys.stdout)
+\x1e STDERR <length>\n<length bytes>       stderr chunk (unsolicited, from sys.stderr)
+<other bytes>                              stdout fallback (pre-redirect / raw REPL)
 ```
 
-For RUN, the device replies `OK RUN <path>` immediately once the file is confirmed to exist, then streams program stdout, then either `OK done <path>` or `ERR <traceback>` when the runner returns. Web app can pair each control command with the next non-stdout frame.
+For RUN, the device replies `OK RUN <path>` immediately once the file is confirmed to exist, then streams program output as `OUT` / `STDERR` frames, then either `OK done <path>` or `ERR <traceback>` when the runner returns. Web pairs each control command with the next OK/ERR/DATA reply; OUT/STDERR frames are unsolicited and routed to console sinks.
+
+`sys.stdout` and `sys.stderr` are redirected at boot (main.py → `protocol.install_stream_redirect()`) so `print()` and traceback output travel as framed OUT / STDERR chunks over every attached transport (USB CDC + BLE NUS). Payload is length-prefixed and binary-safe — literal `#FR:` inside output is not misparsed. The raw-bytes fallback remains for pre-redirect boot messages and for users on a raw REPL.
 
 ## 3. RUN semantics
 
